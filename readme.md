@@ -20,8 +20,8 @@ This plugin adds 4 widgets, 3 at the top that shows the current score by team, a
 
 ## Commands
 ```/war mode <mode>```  
-SWitch the mode between `team` and `all` depending if you want to run in team or all vs all mode. 
-*Usable by everyone*
+Switch the mode between `team` and `all` depending if you want to run in team or all vs all mode. 
+*Usable by MasterAdmin*
 
 ```/war list```  
 Lists all teams in the war with ID, name and identifiers. Example: `1: Faint (Faint, FNT, F)`  
