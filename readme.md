@@ -6,7 +6,7 @@ This was built by drunk **Pensio** and **Oscar** in 2 nights, the code is horrib
 
 ## Installation
 1. Download the [latest release](https://github.com/rosen91/tmnf-war-plugin/archive/refs/heads/master.zip)
-2. Unzip into /xaseco/
+2. Unzip into /xaseco/plugins
 3. Edit `plugins.xml` and include `<plugins>plugin.war.php</plugins>`
 4. Restart XAseco
 
