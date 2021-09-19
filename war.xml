@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<settings>
+    <sidebar_widget>
+        <title>Top players</title>
+		<width>15.5</width>
+
+		<icon_style>Icons128x128_1</icon_style>
+		<icon_substyle>Rankings</icon_substyle>
+
+        <enabled>true</enabled>
+        <pos_x>-64.7</pos_x>
+        <pos_y>-1.25</pos_y>
+        <entries>10</entries>
+        <topcount>3</topcount>
+    </sidebar_widget>
+
+    <your_score_widget>
+        <enabled>true</enabled>
+        <team>
+            <title>Your score</title>
+            <pos_x>-15</pos_x>
+            <pos_y>39.8</pos_y>
+        </team>
+        <all>
+            <title>Your score</title>
+            <pos_x>0</pos_x>
+            <pos_y>39.8</pos_y>
+        </all>
+    </your_score_widget>
+
+     <war_score_widget>
+        <title>War score</title>
+        <enabled>true</enabled>
+        <pos_x>0</pos_x>
+        <pos_y>39.8</pos_y>
+    </war_score_widget>
+
+    <map_score_widget>
+        <title>Map score</title>
+        <enabled>true</enabled>
+        <pos_x>15</pos_x>
+        <pos_y>39.8</pos_y>
+    </map_score_widget>
+
+</settings>

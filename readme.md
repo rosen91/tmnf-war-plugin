@@ -6,9 +6,10 @@ This was built by drunk **Pensio** and **Oscar** in 2 nights, the code is horrib
 
 ## Installation
 1. Download the [latest release](https://github.com/rosen91/tmnf-war-plugin/archive/refs/heads/master.zip)
-2. Unzip into /xaseco/plugins
-3. Edit `plugins.xml` and include `<plugins>plugin.war.php</plugins>`
-4. Restart XAseco
+2. Unzip and move `plugin.war.php` into /xaseco/plugins
+3. Move war.xml into the root of xaseco
+4. Edit `plugins.xml` and include `<plugins>plugin.war.php</plugins>`
+5. Restart XAseco
 
 ## Usage
 ![Plugin](https://raw.githubusercontent.com/rosen91/tmnf-war-plugin/master/faintwar.png)
@@ -18,6 +19,10 @@ When a player connects to the server, this plugin will try to automatically iden
 This plugin adds 4 widgets, 3 at the top that shows the current score by team, and also one sidebar-widget which shows top players by points.
 
 ## Commands
+```/war mode <mode>```  
+SWitch the mode between `team` and `all` depending if you want to run in team or all vs all mode. 
+*Usable by everyone*
+
 ```/war list```  
 Lists all teams in the war with ID, name and identifiers. Example: `1: Faint (Faint, FNT, F)`  
 *Usable by everyone*

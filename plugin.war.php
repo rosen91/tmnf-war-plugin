@@ -4,22 +4,31 @@ Aseco::registerEvent('onSync', 'war_setup');
 Aseco::registerEvent('onPlayerConnect', 'war_playerConnected');
 Aseco::registerEvent('onPlayerFinish', 'war_updateWidgets');
 Aseco::registerEvent('onPlayerManialinkPageAnswer', 'war_toggleWindow');
+Aseco::registerEvent('onNewChallenge', 'war_loadxml');
 
 Aseco::addChatCommand('war', 'Manage war commands');
-
-$maniaPrefix = 65321;
-$warManialinks = [
-    'sidebar_widget' => $maniaPrefix . 1,
-    'all_score_window' => $maniaPrefix . 2
-];
 
 class WarPlugin
 {
     public $aseco;
+    public $warmode = null;
+    public $xml = null;
 
     public function __construct($aseco)
     {
         $this->aseco = $aseco;
+        $this->loadXmlFile();
+    }
+
+    public function loadXmlFile()
+    {
+        if ($this->xml === null) {
+            // Read Configuration
+            if (!$xml_config = simplexml_load_file('war.xml')) {
+                trigger_error('[plugin.war.php] Could not read/parse config file "war.xml"!', E_USER_ERROR);
+            }
+            $this->xml = $xml_config;
+        }
     }
 
     private function isMasterAdmin($player)
@@ -81,16 +90,17 @@ class WarPlugin
         $query3 = "CREATE TABLE IF NOT EXISTS `war_settings` (
             `Id` mediumint(9) NOT NULL auto_increment,
             `max_point_positions` integer(2) NOT NULL default 10,
+            `war_mode` varchar(20) NOT NULL default 'team',
             PRIMARY KEY (`Id`)
         ) ENGINE=MyISAM AUTO_INCREMENT=1 DEFAULT CHARSET=utf8;";
 
         mysql_query($query3);
-
-        $query4 = 'DELETE from war_settings';
-        mysql_query($query4);
-
-        $sql1 = 'INSERT INTO war_settings (max_point_positions) VALUES (10)';
-        mysql_query($sql1);
+        $result = mysql_query("SELECT * FROM war_settings");
+        $num_rows = mysql_num_rows($result);
+        if ($num_rows === 0) {
+            $sql1 = 'INSERT INTO war_settings (max_point_positions) VALUES (10)';
+            mysql_query($sql1);
+        }
     }
 
     public function createTeam($params, $command)
@@ -163,6 +173,10 @@ class WarPlugin
 
     public function drawPlayerScoreWidget()
     {
+        if ($this->xml->your_score_widget->enabled == false || $this->xml->your_score_widget->enabled == 'false') {
+            return;
+        }
+
         foreach ($this->aseco->server->players->player_list as $player) {
             $playerPoint = $this->getPlayerPointsPerMap($this->aseco->server->challenge->id, $player->id);
 
@@ -176,12 +190,19 @@ class WarPlugin
 
             $xml = '<?xml version="1.0" encoding="UTF-8"?>';
             $xml .= '<manialink id="123123458">';
-            $xml .= '<frame posn="-15 39.8">';
+            if ($this->getWarMode() === 'team') {
+                $xml .= '<frame posn="' . $this->xml->your_score_widget->team->pos_x . ' ' . $this->xml->your_score_widget->team->pos_y . '">';
+            } else {
+                $xml .= '<frame posn="' . $this->xml->your_score_widget->all->pos_x . ' ' . $this->xml->your_score_widget->all->pos_y . '">';
+            }
             $xml .= '<format textsize="0.5"/>';
 
             $xml .= '<quad  posn="0 0" sizen="10 ' . $playerScoreWidgetHeight . '" halign="center" valign="top" style="BgsPlayerCard" substyle="ProgressBar" />';
-
-            $xml .= '<label posn="0 -1" sizen="10 2" halign="center" valign="top" text="$oYour score"/>';
+            if ($this->getWarMode() === 'team') {
+                $xml .= '<label posn="0 -1" sizen="10 2" halign="center" valign="top" text="$o' . $this->xml->your_score_widget->team->title . '"/>';
+            } else {
+                $xml .= '<label posn="0 -1" sizen="10 2" halign="center" valign="top" text="$o' . $this->xml->your_score_widget->all->title . '"/>';
+            }
             $posY = -2.6;
             $xml .= '<label posn="-4.3 ' . $posY . '" sizen="10 2" halign="left" textsize="1.2" valign="top" text="This track:"/>';
             $xml .= '<label posn="4.3 ' . $posY . '" sizen="10 2" halign="right" textsize="1.2" valign="top" text="$fff' . $playerPoint . '"/>';
@@ -196,6 +217,9 @@ class WarPlugin
 
     public function drawMapScoreWidget()
     {
+        if ($this->xml->map_score_widget->enabled == false || $this->xml->map_score_widget->enabled == 'false') {
+            return;
+        }
         $boxHeight = 3;
         // $query = 'SELECT wt.team_name, wtp.player_id FROM war_team_players wtp join war_teams wt on wtp.team_id = wt.Id';
         // $res = $this->arrayQuery($query);
@@ -223,12 +247,12 @@ class WarPlugin
         $boxHeight = (count($res) * 2) + $boxHeight;
         $xml = '<?xml version="1.0" encoding="UTF-8"?>';
         $xml .= '<manialink id="123123459">';
-        $xml .= '<frame posn="15 39.8">';
+        $xml .= '<frame posn="' . $this->xml->map_score_widget->pos_x . ' ' . $this->xml->map_score_widget->pos_y . '">';
         $xml .= '<format textsize="0.5"/>';
 
         $xml .= '<quad  posn="0 0" sizen="10 ' . $boxHeight . '" halign="center" valign="top" style="BgsPlayerCard" substyle="ProgressBar" />';
 
-        $xml .= '<label posn="0 -1" sizen="10 2" halign="center" valign="top" text="$oMap Score"/>';
+        $xml .= '<label posn="0 -1" sizen="10 2" halign="center" valign="top" text="$o' . $this->xml->map_score_widget->title . '"/>';
         $posY = -2.6;
         foreach ($teams as $team) {
             $xml .= '<label posn="-4.3 ' . $posY . '" sizen="10 2" halign="left" textsize="1.2" valign="top" text="' . $team['team_name'] . ':"/>';
@@ -243,6 +267,9 @@ class WarPlugin
 
     public function drawTeamsWidget()
     {
+        if ($this->xml->war_score_widget->enabled == false || $this->xml->war_score_widget->enabled == 'false') {
+            return;
+        }
         $boxHeight = 3;
         // $query = 'SELECT wt.team_name, wtp.player_id FROM war_team_players wtp join war_teams wt on wtp.team_id = wt.Id';
         // $res = $this->arrayQuery($query);
@@ -272,12 +299,12 @@ class WarPlugin
         $boxHeight = (count($res) * 2) + $boxHeight;
         $xml = '<?xml version="1.0" encoding="UTF-8"?>';
         $xml .= '<manialink id="123123457">';
-        $xml .= '<frame posn="0 39.8">';
+        $xml .= '<frame posn="' . $this->xml->war_score_widget->pos_x . ' ' . $this->xml->war_score_widget->pos_y . '">';
         $xml .= '<format textsize="0.5"/>';
 
         $xml .= '<quad  posn="0 0" sizen="10 ' . $boxHeight . '" halign="center" valign="top" style="BgsPlayerCard" substyle="ProgressBar" />';
 
-        $xml .= '<label posn="0 -1" sizen="10 2" halign="center" valign="top" text="$oWar Score"/>';
+        $xml .= '<label posn="0 -1" sizen="10 2" halign="center" valign="top" text="$o' . $this->xml->war_score_widget->title . '"/>';
         $posY = -2.6;
         foreach ($teams as $team) {
             $xml .= '<label posn="-4.3 ' . $posY . '" sizen="10 2" halign="left" textsize="1.2" valign="top" text="' . $team['team_name'] . ':"/>';
@@ -527,6 +554,47 @@ class WarPlugin
         }
     }
 
+    public function setMode($params, $command)
+    {
+        $player = $command['author'];
+        if (!$this->isMasterAdmin($player)) {
+            $this->aseco->client->query('ChatSendServerMessageToLogin', $this->aseco->formatColors('NICE TRY BUT NO BANANA'), $player->login);
+            return;
+        }
+
+        $mode = array_shift($params);
+
+        if ($mode === 'team' || $mode === 'all') {
+            $sql = 'UPDATE war_settings set war_mode="' . $mode . '"';
+            mysql_query($sql);
+            $this->warmode = $mode;
+            $this->aseco->client->query('ChatSendServerMessageToLogin', $this->aseco->formatColors('War mode updated'), $player->login);
+
+            if ($mode === 'all') {
+                $xml = '';
+                $xml .= '<manialink id="123123459"></manialink>';
+                $xml .= '<manialink id="123123457"></manialink>';
+
+                $this->aseco->client->query("SendDisplayManialinkPage", $xml, 0, false);
+                $this->drawPlayerScoreWidget();
+            }
+        } else {
+            $this->aseco->client->query('ChatSendServerMessageToLogin', $this->aseco->formatColors('That mode does not exist'), $player->login);
+        }
+    }
+
+    public function getWarMode()
+    {
+        if ($this->warmode === null) {
+            $sql = 'SELECT * from war_settings';
+            $res = $this->arrayQuery($sql);
+            $mode = $res[0]['war_mode'];
+            $this->warmode = $mode;
+        }
+
+        return $this->warmode;
+    }
+
     public function drawSidebar()
     {
         // $xml = '<?xml version="1.0" encoding="UTF-8"';
@@ -538,7 +606,10 @@ class WarPlugin
         // $xml .= '</frame></manialink>';
 
         global $re_config;
-        global $warManialinks;
+
+        if ($this->xml->sidebar_widget->enabled == false || $this->xml->sidebar_widget->enabled == 'false') {
+            return;
+        }
 
         $gamemode = 1;
         $header = '<?xml version="1.0" encoding="UTF-8"?>';
@@ -554,7 +625,7 @@ class WarPlugin
         // Icon and Title
         $header .= '<quad posn="0.4 -0.36 0.002" sizen="%title_background_width% 2" style="' . $re_config['STYLE'][0]['WIDGET_RACE'][0]['TITLE_STYLE'][0] . '" substyle="' . $re_config['STYLE'][0]['WIDGET_RACE'][0]['TITLE_SUBSTYLE'][0] . '"/>';
         $header .= '<quad posn="%posx_icon% %posy_icon% 0.004" sizen="2.5 2.5" style="%icon_style%" substyle="%icon_substyle%"/>';
-        $header .= '<label posn="%posx_title% %posy_title% 0.004" sizen="10.2 0" halign="%halign%" textsize="1" text="Top players"/>';
+        $header .= '<label posn="%posx_title% %posy_title% 0.004" sizen="10.2 0" halign="%halign%" textsize="1" text="' . $this->xml->sidebar_widget->title . '"/>';
         $header .= '<format textsize="1" textcolor="' . $re_config['STYLE'][0]['WIDGET_RACE'][0]['COLORS'][0]['DEFAULT'][0] . '"/>';
 
         $footer  = '</frame>';
@@ -565,10 +636,10 @@ class WarPlugin
         $position = (($re_config['LIVE_RANKINGS'][0]['GAMEMODE'][0][$gamemode][0]['POS_X'][0] < 0) ? 'left' : 'right');
 
         // Set the Topcount
-        $topcount = $re_config['LIVE_RANKINGS'][0]['GAMEMODE'][0][$gamemode][0]['TOPCOUNT'][0];
+        $topcount = $this->xml->sidebar_widget->topcount;
 
         // Calculate the widget height (+ 3.3 for title)
-        $widget_height = ($re_config['LineHeight'] * $re_config['LIVE_RANKINGS'][0]['GAMEMODE'][0][$gamemode][0]['ENTRIES'][0] + 5.3);
+        $widget_height = ($re_config['LineHeight'] * $this->xml->sidebar_widget->entries + 5.3);
 
         if ($position == 'right') {
             $imagex    = ($re_config['Positions'][$position]['image_open']['x'] + ($re_config['LIVE_RANKINGS'][0]['WIDTH'][0] - 15.5));
@@ -604,17 +675,17 @@ class WarPlugin
                 '%title%'
             ),
             array(
-                $warManialinks['sidebar_widget'] . 1,
-                9876543211,
-                -64.7,
-                -1.25,
+                '1234512348',
+                '1234512349',
+                $this->xml->sidebar_widget->pos_x,
+                $this->xml->sidebar_widget->pos_y,
                 $imagex,
                 - ($widget_height - 3.3 + 2),
                 $re_config['Positions'][$position]['image_open']['image'],
                 $iconx,
                 $re_config['Positions'][$position]['icon']['y'],
-                $re_config['LIVE_RANKINGS'][0]['ICON_STYLE'][0],
-                $re_config['LIVE_RANKINGS'][0]['ICON_SUBSTYLE'][0],
+                $this->xml->sidebar_widget->icon_style,
+                $this->xml->sidebar_widget->icon_substyle,
                 $re_config['Positions'][$position]['title']['halign'],
                 $titlex,
                 $re_config['Positions'][$position]['title']['y'],
@@ -638,7 +709,7 @@ class WarPlugin
 
         $playerRecs = $this->getPlayerRecs();
 
-        $limit = 10;
+        $limit = $this->xml->sidebar_widget->entries;
         if (count($playerRecs) > 0) {
             // Build the entries
             $line = 0;
@@ -715,34 +786,47 @@ function war_setup($aseco)
     global $warPlugin;
     $warPlugin = new WarPlugin($aseco);
     $warPlugin->setupDb();
-    $warPlugin->drawTeamsWidget();
     $warPlugin->drawPlayerScoreWidget();
-    $warPlugin->drawMapScoreWidget();
+    if ($warPlugin->getWarMode() === 'team') {
+        $warPlugin->drawTeamsWidget();
+        $warPlugin->drawMapScoreWidget();
+    }
     $warPlugin->drawSidebar();
 }
 
 function war_playerConnected($aseco, $player)
 {
     global $warPlugin;
-    $warPlugin->addPlayerToTeam($player);
-    $warPlugin->drawTeamsWidget();
     $warPlugin->drawPlayerScoreWidget();
-    $warPlugin->drawMapScoreWidget();
+    if ($warPlugin->getWarMode() === 'team') {
+        $warPlugin->addPlayerToTeam($player);
+        $warPlugin->drawTeamsWidget();
+        $warPlugin->drawMapScoreWidget();
+    }
     $warPlugin->drawSidebar();
 }
 
 function war_updateWidgets($aseco, $record)
 {
     global $warPlugin;
-    $warPlugin->drawTeamsWidget();
     $warPlugin->drawPlayerScoreWidget();
-    $warPlugin->drawMapScoreWidget();
+    if ($warPlugin->getWarMode() === 'team') {
+        $warPlugin->drawTeamsWidget();
+        $warPlugin->drawMapScoreWidget();
+    }
     $warPlugin->drawSidebar();
 }
 
+function war_loadxml($aseco, $tab)
+{
+    global $warPlugin;
+    $warPlugin->loadXmlFile();
+}
+
+
 function war_toggleWindow($aseco, $answer)
 {
-    global $re_config, $re_cache, $re_placement, $warManialinks, $warPlugin;
+    global $warPlugin;
 
     // If id = 0, bail out immediately
     if ($answer[2] == 0) {
@@ -755,27 +839,14 @@ function war_toggleWindow($aseco, $answer)
     // Get the Player object
     $player = $aseco->server->players->player_list[$answer[1]];
 
-    if ($answer[2] == 382009003) {
-
-        // Toggle RecordsWidget for calling Player (F7)
-        $command['author'] = $player;
-        //re_toggleWidgets($aseco, $command);
-    } else if ($answer[2] == (int)$re_config['ManialinkId'] . '00') {
-
-        // Close Window
-        $widgets .= war_closeAllWindows();
-    } else if ($answer[2] == (int)$re_config['ManialinkId'] . '01') {
-
-        // Close SubWindow
-        $widgets .= war_closeAllSubWindows();
-    } else if ($answer[2] == (int)'1286608619') {
+    if ($answer[2] == (int)'1234512349') {
 
         // Show the All points window
         $widgets .= $warPlugin->drawPointsWindow();
+        $warPlugin->sendManialinks($widgets, $player->login);
     }
-
-    $warPlugin->sendManialinks($widgets, $player->login);
 }
+
 
 function war_closeAllWindows()
 {
@@ -825,6 +896,9 @@ function chat_war($aseco, $command)
             break;
         case 'removeplayer':
             $warPlugin->removePlayer($params, $command);
+            break;
+        case 'mode':
+            $warPlugin->setMode($params, $command);
             break;
         default:
             $aseco->client->query('ChatSendServerMessageToLogin', $aseco->formatColors('Command not found'), $player->login);
