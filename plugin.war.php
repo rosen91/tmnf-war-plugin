@@ -139,7 +139,7 @@ class WarPlugin
         $query1 = 'SELECT * FROM war_settings';
         $resQ1 = $this->arrayQuery($query1);
 
-        $sql1 = 'SELECT r.PLayerID as player_id, r.Score as score From records r left join challenges c on r.ChallengeId = c.Id where r.ID IS NOT NULL AND c.id=' . $challengeId . ' ORDER BY Score ASC';
+        $sql1 = 'SELECT r.PLayerID as player_id, r.Score as score From records r left join challenges c on r.ChallengeId = c.Id where r.ID IS NOT NULL AND c.id=' . $challengeId . ' ORDER BY Score ASC, Date ASC';
         $res1 = $this->arrayQuery($sql1);
 
         if (count($res1) === 0) {
