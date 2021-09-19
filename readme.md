@@ -11,7 +11,7 @@ This was built by drunk **Pensio** and **Oscar** in 2 nights, the code is horrib
 4. Restart XAseco
 
 ## Usage
-![Plugin]([http://url/to/img.png](https://github.com/rosen91/tmnf-war-plugin/blob/[branch]/faintwar.png?raw=true))
+![Plugin](https://raw.githubusercontent.com/rosen91/tmnf-war-plugin/master/faintwar.png)
 
 When a player connects to the server, this plugin will try to automatically identify the player and add them to the team that matches the nickname with the team identifier. If no match is found it will say so in chat and you may ask a captain or superadmin to manually add you to the team. 
 
