@@ -639,7 +639,7 @@ class WarPlugin
         $topcount = $this->xml->sidebar_widget->topcount;
 
         // Calculate the widget height (+ 3.3 for title)
-        $widget_height = ($re_config['LineHeight'] * $this->xml->sidebar_widget->entries + 5.3);
+        $widget_height = ($re_config['LineHeight'] * (int) $this->xml->sidebar_widget->entries + 1.3);
 
         if ($position == 'right') {
             $imagex    = ($re_config['Positions'][$position]['image_open']['x'] + ($re_config['LIVE_RANKINGS'][0]['WIDTH'][0] - 15.5));
