@@ -18,6 +18,8 @@ When a player connects to the server, this plugin will try to automatically iden
 
 This plugin adds 4 widgets, 3 at the top that shows the current score by team, and also one sidebar-widget which shows top players by points.
 
+By default this plugin has a widget that shows up under dedimania-records on the left side of the screen, for this to be visible, dedimania recs needs to have it's entries set to max 12. This can be changed in the records_eyepiece.xml file.
+
 ## Commands
 ```/war mode <mode>```  
 Switch the mode between `team` and `all` depending if you want to run in team or all vs all mode. 
