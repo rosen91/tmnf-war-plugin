@@ -5,6 +5,7 @@ Aseco::registerEvent('onPlayerConnect', 'war_playerConnected');
 Aseco::registerEvent('onPlayerFinish', 'war_updateWidgets');
 Aseco::registerEvent('onPlayerManialinkPageAnswer', 'war_toggleWindow');
 Aseco::registerEvent('onNewChallenge', 'war_loadxml');
+Aseco::registerEvent('onEndRace', 'war_onEndRace');
 
 Aseco::addChatCommand('war', 'Manage war commands');
 
@@ -13,6 +14,12 @@ class WarPlugin
     public $aseco;
     public $warmode = null;
     public $xml = null;
+    public $manialinkPrefix = '12345123';
+    public $manialinks = ['sidebar_widget' => '01', 'sidebar_widget_window' => '02', 'mapscore_widget' => '03', 'teamscore_widget' => '04', 'yourscore_widget' => '05'];
+    public $chatPrefix = '$f33[$fffWAR$f33]$fff - ';
+    public $widgetsVisible = true;
+    public $playerToggledWidgets = true;
+    public $lastRedrawn = null;
 
     public function __construct($aseco)
     {
@@ -44,11 +51,11 @@ class WarPlugin
     private function isCaptainOrMasterAdmin($player)
     {
         // check if masteradmin
-        if ($this->aseco->isMasterAdmin($player)) {
+        if ($this->isMasterAdmin($player)) {
             return true;
         }
 
-        $sql = 'SELECT * from players where Login="' . $player->login . '"';
+        $sql = 'SELECT * from players where Login="' . $player->login . '" LIMIT 1';
         $res = $this->arrayQuery($sql);
         if (count($res) > 0) {
             $levelQuery = 'SELECT * from war_team_players where player_id=' . $res[0]['Id'];
@@ -103,11 +110,70 @@ class WarPlugin
         }
     }
 
+    public function redrawWidgets($playerObject, $force = false)
+    {
+        if ($this->playerToggledWidgets === false || $this->widgetsVisible === false) {
+            return;
+        }
+        if ($this->lastRedrawn && !$force) {
+            if (time() - $this->lastRedrawn < 2) {
+                $timePassed = time() - $this->lastRedrawn;
+                return;
+            }
+        }
+        $xml = '';
+
+        foreach ($this->aseco->server->players->player_list as $player) {
+            $this->sendManialinks($this->drawPlayerScoreWidget($player), $player->login);
+        }
+
+        $xml .= $this->drawSidebar();
+        if ($this->getWarMode() === 'team') {
+            $xml .= $this->drawMapScoreWidget();
+            $xml .= $this->drawTeamsWidget();
+        }
+        if ($playerObject !== null) {
+            $this->sendManialinks($xml, $playerObject->login);
+        } else {
+            $this->sendManialinks($xml);
+        }
+
+        $this->lastRedrawn = time();
+    }
+
+    public function toggleWidgets($player)
+    {
+        if (!$this->widgetsVisible) {
+            return;
+        }
+        if ($this->playerToggledWidgets) {
+            $this->playerToggledWidgets = false;
+            $this->hideWidgets($player);
+        } else {
+            $this->playerToggledWidgets = true;
+            $this->showWidgets($player);
+        }
+    }
+
+    public function hideWidgets($player)
+    {
+        $xml = '';
+        foreach ($this->manialinks as $key => $manialink) {
+            $xml .= '<manialink id="' . $this->manialinkPrefix . $manialink . '"></manialink>';
+        }
+        $this->sendManialinks($xml, $player->login);
+    }
+
+    public function showWidgets($player)
+    {
+        $this->redrawWidgets($player);
+    }
+
     public function createTeam($params, $command)
     {
         $player = $command['author'];
         if (!$this->isCaptainOrMasterAdmin($player)) {
-            $this->aseco->client->query('ChatSendServerMessageToLogin', $this->aseco->formatColors('NICE TRY BUT NO BANANA'), $player->login);
+            $this->aseco->client->query('ChatSendServerMessageToLogin', $this->aseco->formatColors($this->chatPrefix . 'You don’t have permission to use that command.'), $player->login);
             return;
         }
 
@@ -118,30 +184,35 @@ class WarPlugin
 
         $result = mysql_query($query);
 
-        $this->aseco->client->query('ChatSendServerMessageToLogin', $this->aseco->formatColors('Team: ' . $team . ' added, with identifiers: ' . implode(', ', $identifiers)), $player->login);
+        $this->aseco->client->query('ChatSendServerMessageToLogin', $this->aseco->formatColors($this->chatPrefix . 'Team: ' . $team . '$z$s$fff added, with identifiers: ' . implode(', ', $identifiers)), $player->login);
     }
 
     public function addTag($params, $command)
     {
         $player = $command['author'];
         if (!$this->isCaptainOrMasterAdmin($player)) {
-            $this->aseco->client->query('ChatSendServerMessageToLogin', $this->aseco->formatColors('NICE TRY BUT NO BANANA'), $player->login);
+            $this->aseco->client->query('ChatSendServerMessageToLogin', $this->aseco->formatColors($this->chatPrefix . 'You don’t have permission to use that command.'), $player->login);
             return;
         }
 
         $teamId = array_shift($params);
         $newIdentifiers = $params;
 
-        $sql = 'SELECT * from war_teams where Id=' . $teamId;
+        $sql = 'SELECT * from war_teams where Id=' . $teamId . ' LIMIT 1';
         $res = $this->arrayQuery($sql);
         if (count($res) > 0) {
             $oldIdentifiers = $res[0]['team_identifiers'];
-            $identifers = $oldIdentifiers . ',' . implode(',', $newIdentifiers);
-            $query = 'UPDATE `war_teams` set team_identifiers = ' . quotedString($identifers) . ' WHERE Id=' . $teamId;
+            $team = $res[0]['team_name'];
+            $identifiers = $oldIdentifiers . ',' . implode(',', $newIdentifiers);
+            $query = 'UPDATE `war_teams` set team_identifiers = ' . quotedString($identifiers) . ' WHERE Id=' . $teamId;
             $result = mysql_query($query);
+            $msg = $this->chatPrefix . 'Identifiers: ' . implode(', ', $newIdentifiers) . ' added to team: ' . $team;
+        } else {
+            $msg = $this->chatPrefix . 'No team found with that ID';
         }
 
-        $this->aseco->client->query('ChatSendServerMessageToLogin', $this->aseco->formatColors('Identifiers added: ' . implode(', ', $identifers)), $player->login);
+
+        $this->aseco->client->query('ChatSendServerMessageToLogin', $this->aseco->formatColors($msg), $player->login);
     }
 
     public function getPlayerPointsPerMap($challengeId, $playerId)
@@ -171,48 +242,47 @@ class WarPlugin
         return $playerPoint;
     }
 
-    public function drawPlayerScoreWidget()
+    public function drawPlayerScoreWidget($player)
     {
         if ($this->xml->your_score_widget->enabled == false || $this->xml->your_score_widget->enabled == 'false') {
             return;
         }
 
-        foreach ($this->aseco->server->players->player_list as $player) {
-            $playerPoint = $this->getPlayerPointsPerMap($this->aseco->server->challenge->id, $player->id);
+        $playerPoint = $this->getPlayerPointsPerMap($this->aseco->server->challenge->id, $player->id);
 
-            $sql = 'SELECT * from challenges';
-            $res = $this->arrayQuery($sql);
-            $pPoints = 0;
-            foreach ($res as $map) {
-                $pPoints += $this->getPlayerPointsPerMap($map['Id'], $player->id);
-            }
-            $playerScoreWidgetHeight = 7;
-
-            $xml = '<?xml version="1.0" encoding="UTF-8"?>';
-            $xml .= '<manialink id="123123458">';
-            if ($this->getWarMode() === 'team') {
-                $xml .= '<frame posn="' . $this->xml->your_score_widget->team->pos_x . ' ' . $this->xml->your_score_widget->team->pos_y . '">';
-            } else {
-                $xml .= '<frame posn="' . $this->xml->your_score_widget->all->pos_x . ' ' . $this->xml->your_score_widget->all->pos_y . '">';
-            }
-            $xml .= '<format textsize="0.5"/>';
-
-            $xml .= '<quad  posn="0 0" sizen="10 ' . $playerScoreWidgetHeight . '" halign="center" valign="top" style="BgsPlayerCard" substyle="ProgressBar" />';
-            if ($this->getWarMode() === 'team') {
-                $xml .= '<label posn="0 -1" sizen="10 2" halign="center" valign="top" text="$o' . $this->xml->your_score_widget->team->title . '"/>';
-            } else {
-                $xml .= '<label posn="0 -1" sizen="10 2" halign="center" valign="top" text="$o' . $this->xml->your_score_widget->all->title . '"/>';
-            }
-            $posY = -2.6;
-            $xml .= '<label posn="-4.3 ' . $posY . '" sizen="10 2" halign="left" textsize="1.2" valign="top" text="This track:"/>';
-            $xml .= '<label posn="4.3 ' . $posY . '" sizen="10 2" halign="right" textsize="1.2" valign="top" text="$fff' . $playerPoint . '"/>';
-
-            $xml .= '<label posn="-4.3 -4.6" sizen="10 2" halign="left" textsize="1.2" valign="top" text="Total:"/>';
-            $xml .= '<label posn="4.3 -4.6" sizen="10 2" halign="right" textsize="1.2" valign="top" text="$fff' . $pPoints . '"/>';
-
-            $xml .= '</frame></manialink>';
-            $this->aseco->client->query("SendDisplayManialinkPageToLogin", $player->login, $xml, 0, false);
+        $sql = 'SELECT * from challenges';
+        $res = $this->arrayQuery($sql);
+        $pPoints = 0;
+        foreach ($res as $map) {
+            $pPoints += $this->getPlayerPointsPerMap($map['Id'], $player->id);
         }
+        $playerScoreWidgetHeight = 7;
+
+        $xml = '<?xml version="1.0" encoding="UTF-8"?>';
+        $xml .= '<manialink id="' . $this->manialinkPrefix . $this->manialinks['yourscore_widget'] . '">';
+        if ($this->getWarMode() === 'team') {
+            $xml .= '<frame posn="' . $this->xml->your_score_widget->team->pos_x . ' ' . $this->xml->your_score_widget->team->pos_y . '">';
+        } else {
+            $xml .= '<frame posn="' . $this->xml->your_score_widget->all->pos_x . ' ' . $this->xml->your_score_widget->all->pos_y . '">';
+        }
+        $xml .= '<format textsize="0.5"/>';
+
+        $xml .= '<quad  posn="0 0" sizen="10 ' . $playerScoreWidgetHeight . '" halign="center" valign="top" style="BgsPlayerCard" substyle="ProgressBar" />';
+        if ($this->getWarMode() === 'team') {
+            $xml .= '<label posn="0 -1" sizen="10 2" halign="center" valign="top" text="$o' . $this->xml->your_score_widget->team->title . '"/>';
+        } else {
+            $xml .= '<label posn="0 -1" sizen="10 2" halign="center" valign="top" text="$o' . $this->xml->your_score_widget->all->title . '"/>';
+        }
+        $posY = -2.6;
+        $xml .= '<label posn="-4.3 ' . $posY . '" sizen="10 2" halign="left" textsize="1.2" valign="top" text="This track:"/>';
+        $xml .= '<label posn="4.3 ' . $posY . '" sizen="10 2" halign="right" textsize="1.2" valign="top" text="$fff' . $playerPoint . '"/>';
+
+        $xml .= '<label posn="-4.3 -4.6" sizen="10 2" halign="left" textsize="1.2" valign="top" text="Total:"/>';
+        $xml .= '<label posn="4.3 -4.6" sizen="10 2" halign="right" textsize="1.2" valign="top" text="$fff' . $pPoints . '"/>';
+
+        $xml .= '</frame></manialink>';
+
+        return $xml;
     }
 
     public function drawMapScoreWidget()
@@ -221,8 +291,6 @@ class WarPlugin
             return;
         }
         $boxHeight = 3;
-        // $query = 'SELECT wt.team_name, wtp.player_id FROM war_team_players wtp join war_teams wt on wtp.team_id = wt.Id';
-        // $res = $this->arrayQuery($query);
 
         $query = 'SELECT * FROM war_teams';
         $res = $this->arrayQuery($query);
@@ -246,7 +314,7 @@ class WarPlugin
         // Team score widgeten
         $boxHeight = (count($res) * 2) + $boxHeight;
         $xml = '<?xml version="1.0" encoding="UTF-8"?>';
-        $xml .= '<manialink id="123123459">';
+        $xml .= '<manialink id="' . $this->manialinkPrefix . $this->manialinks['mapscore_widget'] . '">';
         $xml .= '<frame posn="' . $this->xml->map_score_widget->pos_x . ' ' . $this->xml->map_score_widget->pos_y . '">';
         $xml .= '<format textsize="0.5"/>';
 
@@ -262,7 +330,7 @@ class WarPlugin
 
         $xml .= '</frame></manialink>';
 
-        $this->aseco->client->query("SendDisplayManialinkPage", $xml, 0, false);
+        return $xml;
     }
 
     public function drawTeamsWidget()
@@ -271,8 +339,6 @@ class WarPlugin
             return;
         }
         $boxHeight = 3;
-        // $query = 'SELECT wt.team_name, wtp.player_id FROM war_team_players wtp join war_teams wt on wtp.team_id = wt.Id';
-        // $res = $this->arrayQuery($query);
 
         $query = 'SELECT * FROM war_teams';
         $res = $this->arrayQuery($query);
@@ -298,7 +364,7 @@ class WarPlugin
         // Team score widgeten
         $boxHeight = (count($res) * 2) + $boxHeight;
         $xml = '<?xml version="1.0" encoding="UTF-8"?>';
-        $xml .= '<manialink id="123123457">';
+        $xml .= '<manialink id="' . $this->manialinkPrefix . $this->manialinks['teamscore_widget'] . '">';
         $xml .= '<frame posn="' . $this->xml->war_score_widget->pos_x . ' ' . $this->xml->war_score_widget->pos_y . '">';
         $xml .= '<format textsize="0.5"/>';
 
@@ -314,7 +380,7 @@ class WarPlugin
 
         $xml .= '</frame></manialink>';
 
-        $this->aseco->client->query("SendDisplayManialinkPage", $xml, 0, false);
+        return $xml;
     }
 
     public function drawPointsWindow()
@@ -412,7 +478,7 @@ class WarPlugin
     {
         $player = $command['author'];
         if (!$this->isMasterAdmin($player)) {
-            $this->aseco->client->query('ChatSendServerMessageToLogin', $this->aseco->formatColors('NICE TRY BUT NO BANANA'), $player->login);
+            $this->aseco->client->query('ChatSendServerMessageToLogin', $this->aseco->formatColors($this->chatPrefix . 'You don’t have permission to use that command.'), $player->login);
             return;
         }
 
@@ -422,7 +488,7 @@ class WarPlugin
         $query1 = 'DELETE FROM `war_teams`';
         mysql_query($query1);
 
-        $msg = 'War is reset';
+        $msg = $this->chatPrefix . 'War has been reset';
 
         $this->aseco->client->query('ChatSendServerMessageToLogin', $this->aseco->formatColors($msg), $player->login);
     }
@@ -432,9 +498,9 @@ class WarPlugin
         $player = $command['author'];
         $query = 'SELECT * FROM `war_teams`';
         $result = $this->arrayQuery($query);
-        $msg = 'This is the registered teams: ';
+        $msg = $this->chatPrefix . 'This is the registered teams: ';
         foreach ($result as $team) {
-            $msg .= $team['Id'] . ': ' .  $team['team_name'] . ' (' . $team['team_identifiers'] . '), ';
+            $msg .= $team['Id'] . ': ' .  $team['team_name'] . '$z$s$fff (' . $team['team_identifiers'] . '), ';
         }
 
         $msg = rtrim($msg, ', ');
@@ -446,11 +512,11 @@ class WarPlugin
     {
         $player = $command['author'];
         if (!$this->isCaptainOrMasterAdmin($player)) {
-            $this->aseco->client->query('ChatSendServerMessageToLogin', $this->aseco->formatColors('NICE TRY BUT NO BANANA'), $player->login);
+            $this->aseco->client->query('ChatSendServerMessageToLogin', $this->aseco->formatColors($this->chatPrefix . 'You don’t have permission to use that command.'), $player->login);
             return;
         }
 
-        $playerQuery = 'SELECT * from players where Login="' . $params[0] . '"';
+        $playerQuery = 'SELECT * from players where Login="' . $params[0] . '" LIMIT 1';
         $res = $this->arrayQuery($playerQuery);
         if (count($res)) {
             $del = 'DELETE from war_team_players WHERE player_id=' . $res[0]['Id'];
@@ -458,7 +524,17 @@ class WarPlugin
 
             $insert = 'INSERT INTO war_team_players (player_id, team_id) VALUES (' . $res[0]['Id'] . ',' . $params[1] . ')';
             mysql_query($insert);
-            $msg = 'Player added to team';
+
+            $teamQuery = 'SELECT * from war_teams where Id=' . $params[1] . ' LIMIT 1';
+            $teamRes = $this->arrayQuery($teamQuery);
+            if (count($teamRes) === 0) {
+                $msg = $this->chatPrefix . 'No team found with that ID';
+            } else {
+                $msg = $this->chatPrefix . $res[0]['NickName'] . '$z$s$fff has been added to ' . $teamRes[0]['team_name'];
+            }
+            $this->aseco->client->query('ChatSendServerMessage', $this->aseco->formatColors($msg));
+        } else {
+            $msg = $this->chatPrefix . 'No player found with that login';
             $this->aseco->client->query('ChatSendServerMessageToLogin', $this->aseco->formatColors($msg), $player->login);
         }
     }
@@ -467,26 +543,34 @@ class WarPlugin
     {
         $player = $command['author'];
         if (!$this->isCaptainOrMasterAdmin($player)) {
-            $this->aseco->client->query('ChatSendServerMessageToLogin', $this->aseco->formatColors('NICE TRY BUT NO BANANA'), $player->login);
+            $this->aseco->client->query('ChatSendServerMessageToLogin', $this->aseco->formatColors($this->chatPrefix . 'You don’t have permission to use that command.'), $player->login);
             return;
         }
 
         $playerQuery = 'SELECT * from players where Login="' . $params[0] . '"';
         $res = $this->arrayQuery($playerQuery);
         if (count($res)) {
+            $teamQuery = 'SELECT war_teams.team_name as team_name, war_team_players.player_id as player_id from war_team_players join war_teams on war_team_players.team_id=war_teams.Id where war_team_players.player_id=' . $res[0]['Id'];
+            $teamRes = $this->arrayQuery($teamQuery);
+
             $del = 'DELETE from war_team_players WHERE player_id=' . $res[0]['Id'];
             mysql_query($del);
 
-            $msg = 'Player removed from team';
-            $this->aseco->client->query('ChatSendServerMessageToLogin', $this->aseco->formatColors($msg), $player->login);
+            //  ‘ . $player[‘nickname’] . ‘ has been removed from ‘ . $team[‘team_name’]
+
+            $msg = $this->chatPrefix . $res[0]['NickName'] . '$z$s$fff has been removed from team ' . $teamRes[0]['team_name'];
+        } else {
+            $msg = $this->chatPrefix . 'No player found with that login';
         }
+
+        $this->aseco->client->query('ChatSendServerMessageToLogin', $this->aseco->formatColors($msg), $player->login);
     }
 
     public function addCaptain($params, $command)
     {
         $player = $command['author'];
         if (!$this->isCaptainOrMasterAdmin($player)) {
-            $this->aseco->client->query('ChatSendServerMessageToLogin', $this->aseco->formatColors('NICE TRY BUT NO BANANA'), $player->login);
+            $this->aseco->client->query('ChatSendServerMessageToLogin', $this->aseco->formatColors($this->chatPrefix . 'You don’t have permission to use that command.'), $player->login);
             return;
         }
         $playerQuery = 'SELECT * from players where Login="' . $params[0] . '"';
@@ -495,7 +579,18 @@ class WarPlugin
 
             $insert = 'UPDATE war_team_players set level=1 where player_id =' . $res[0]['Id'] . '';
             mysql_query($insert);
-            $msg = 'Player set as captain';
+
+            $teamQuery = 'SELECT war_teams.team_name as team_name, war_team_players.player_id as player_id from war_team_players join war_teams on war_team_players.team_id=war_teams.Id where war_team_players.player_id=' . $res[0]['Id'];
+            $teamRes = $this->arrayQuery($teamQuery);
+            if (count($teamRes)) {
+                $msg = $this->chatPrefix . $res[0]['NickName'] . '$z$s$fff has been added as captain for ' . $teamRes[0]['team_name'];
+                $this->aseco->client->query('ChatSendServerMessage', $this->aseco->formatColors($msg));
+            } else {
+                $msg = $this->chatPrefix . 'Player does not belong to a team';
+                $this->aseco->client->query('ChatSendServerMessageToLogin', $this->aseco->formatColors($msg), $player->login);
+            }
+        } else {
+            $msg = $this->chatPrefix . 'No player found with that login';
             $this->aseco->client->query('ChatSendServerMessageToLogin', $this->aseco->formatColors($msg), $player->login);
         }
     }
@@ -504,7 +599,7 @@ class WarPlugin
     {
         $player = $command['author'];
         if (!$this->isMasterAdmin($player)) {
-            $this->aseco->client->query('ChatSendServerMessageToLogin', $this->aseco->formatColors('NICE TRY BUT NO BANANA'), $player->login);
+            $this->aseco->client->query('ChatSendServerMessageToLogin', $this->aseco->formatColors($this->chatPrefix . 'You don’t have permission to use that command.'), $player->login);
             return;
         }
         $max = array_shift($params);
@@ -513,17 +608,17 @@ class WarPlugin
 
         $sql1 = 'INSERT INTO war_settings (max_point_positions) VALUES (' . $max . ')';
         mysql_query($sql1);
-        $msg = 'Settings updated';
-        $this->aseco->client->query('ChatSendServerMessageToLogin', $this->aseco->formatColors($msg), $player->login);
+        $msg = $this->chatPrefix . 'War settings updated, top ' . $max . ' players recieve points';
+        $this->aseco->client->query('ChatSendServerMessage', $this->aseco->formatColors($msg));
     }
 
     public function addPlayerToTeam($player)
     {
-        $query = 'SELECT * FROM `war_team_players` WHERE player_id=' . $player->id;
+        $query = 'SELECT war_teams.team_name as team_name, war_team_players.player_id as player_id from war_team_players join war_teams on war_team_players.team_id=war_teams.Id where war_team_players.player_id=' . $player->id;
         $res = $this->arrayQuery($query);
         if (count($res) > 0) {
-            $msg = 'Welcome! You are not alone, you belong to a team.';
-            $this->aseco->client->query('ChatSendServerMessageToLogin', $this->aseco->formatColors($msg), $player->login);
+            $msg = $this->chatPrefix . 'Welcome ' . $player->nickname . '$z$s$fff! You are not alone, you belong to ' . $res[0]['team_name'];
+            $this->aseco->client->query('ChatSendServerMessageToLogin', $msg, $player->login);
         } else {
             $matchedTeam = null;
             $nickname = $player->nickname;
@@ -539,17 +634,14 @@ class WarPlugin
             }
 
             if ($matchedTeam === null) {
-                $msg = 'No team matches your nickname, ask an admin or team captain to manually add you or change nickname';
+                $msg = $this->chatPrefix . 'No team matches your nickname, ask an admin or team captain to manually add you or change nickname';
                 $this->aseco->client->query('ChatSendServerMessageToLogin', $this->aseco->formatColors($msg), $player->login);
-                $this->aseco->console($msg);
             } else {
                 $query = 'INSERT INTO war_team_players (player_id, team_id) VALUES (' . $player->id . ',' . $matchedTeam['Id'] . ')';
-                $this->aseco->console($query);
                 mysql_query($query);
 
-                $msg = 'You were added to team: ' . $matchedTeam['team_name'];
+                $msg = $this->chatPrefix . 'You were added to team: ' . $matchedTeam['team_name'];
                 $this->aseco->client->query('ChatSendServerMessageToLogin', $this->aseco->formatColors($msg), $player->login);
-                $this->aseco->console($msg);
             }
         }
     }
@@ -558,7 +650,7 @@ class WarPlugin
     {
         $player = $command['author'];
         if (!$this->isMasterAdmin($player)) {
-            $this->aseco->client->query('ChatSendServerMessageToLogin', $this->aseco->formatColors('NICE TRY BUT NO BANANA'), $player->login);
+            $this->aseco->client->query('ChatSendServerMessageToLogin', $this->aseco->formatColors($this->chatPrefix . 'You don’t have permission to use that command.'), $player->login);
             return;
         }
 
@@ -568,18 +660,20 @@ class WarPlugin
             $sql = 'UPDATE war_settings set war_mode="' . $mode . '"';
             mysql_query($sql);
             $this->warmode = $mode;
-            $this->aseco->client->query('ChatSendServerMessageToLogin', $this->aseco->formatColors('War mode updated'), $player->login);
+            $this->aseco->client->query('ChatSendServerMessage', $this->aseco->formatColors($this->chatPrefix . 'War mode updated'));
 
             if ($mode === 'all') {
                 $xml = '';
-                $xml .= '<manialink id="123123459"></manialink>';
-                $xml .= '<manialink id="123123457"></manialink>';
+                $xml .= '<manialink id="' . $this->manialinkPrefix . $this->manialinks['teamscore_widget'] . '"></manialink>';
+                $xml .= '<manialink id="' . $this->manialinkPrefix . $this->manialinks['mapscore_widget'] . '"></manialink>';
 
                 $this->aseco->client->query("SendDisplayManialinkPage", $xml, 0, false);
-                $this->drawPlayerScoreWidget();
+                $this->redrawWidgets(null);
+            } else {
+                $this->redrawWidgets(null);
             }
         } else {
-            $this->aseco->client->query('ChatSendServerMessageToLogin', $this->aseco->formatColors('That mode does not exist'), $player->login);
+            $this->aseco->client->query('ChatSendServerMessageToLogin', $this->aseco->formatColors($this->chatPrefix . 'That mode does not exist'), $player->login);
         }
     }
 
@@ -675,8 +769,8 @@ class WarPlugin
                 '%title%'
             ),
             array(
-                '1234512348',
-                '1234512349',
+                $this->manialinkPrefix . $this->manialinks['sidebar_widget'],
+                $this->manialinkPrefix . $this->manialinks['sidebar_widget_window'],
                 $this->xml->sidebar_widget->pos_x,
                 $this->xml->sidebar_widget->pos_y,
                 $imagex,
@@ -733,7 +827,7 @@ class WarPlugin
         $xml .= $build['footer'];
 
 
-        $this->aseco->client->query("SendDisplayManialinkPage", $xml, 0, false);
+        return $xml;
     }
 
     private function getPlayerRecs()
@@ -786,41 +880,33 @@ function war_setup($aseco)
     global $warPlugin;
     $warPlugin = new WarPlugin($aseco);
     $warPlugin->setupDb();
-    $warPlugin->drawPlayerScoreWidget();
-    if ($warPlugin->getWarMode() === 'team') {
-        $warPlugin->drawTeamsWidget();
-        $warPlugin->drawMapScoreWidget();
-    }
-    $warPlugin->drawSidebar();
+    $warPlugin->redrawWidgets(null);
 }
 
 function war_playerConnected($aseco, $player)
 {
     global $warPlugin;
-    $warPlugin->drawPlayerScoreWidget();
-    if ($warPlugin->getWarMode() === 'team') {
-        $warPlugin->addPlayerToTeam($player);
-        $warPlugin->drawTeamsWidget();
-        $warPlugin->drawMapScoreWidget();
-    }
-    $warPlugin->drawSidebar();
+    $warPlugin->addPlayerToTeam($player);
+    $warPlugin->redrawWidgets($player, true);
 }
 
 function war_updateWidgets($aseco, $record)
 {
     global $warPlugin;
-    $warPlugin->drawPlayerScoreWidget();
-    if ($warPlugin->getWarMode() === 'team') {
-        $warPlugin->drawTeamsWidget();
-        $warPlugin->drawMapScoreWidget();
-    }
-    $warPlugin->drawSidebar();
+    $warPlugin->redrawWidgets(null);
 }
 
 function war_loadxml($aseco, $tab)
 {
     global $warPlugin;
     $warPlugin->loadXmlFile();
+    $warPlugin->showWidgets(null);
+}
+
+function war_onEndRace($aseco, $race)
+{
+    global $warPlugin;
+    $warPlugin->hideWidgets();
 }
 
 
@@ -838,31 +924,16 @@ function war_toggleWindow($aseco, $answer)
 
     // Get the Player object
     $player = $aseco->server->players->player_list[$answer[1]];
+    //$aseco->client->query('ChatSendServerMessageToLogin', 'test ' . $answer[2], $player->login);
 
-    if ($answer[2] == (int)'1234512349') {
+    if ($answer[2] == 382009003) {
 
+        $warPlugin->toggleWidgets($player);
+    } else  if ($answer[2] == (int) $warPlugin->manialinkPrefix . $warPlugin->manialinks['sidebar_widget_window']) {
         // Show the All points window
         $widgets .= $warPlugin->drawPointsWindow();
         $warPlugin->sendManialinks($widgets, $player->login);
     }
-}
-
-
-function war_closeAllWindows()
-{
-    global $re_config;
-
-
-    $xml  = '<manialink id="' . $re_config['ManialinkId'] . '00"></manialink>';    // MainWindow
-    $xml .= '<manialink id="' . $re_config['ManialinkId'] . '01"></manialink>';    // SubWindow
-    return $xml;
-}
-
-function war_closeAllSubWindows()
-{
-    global $re_config;
-
-    return '<manialink id="' . $re_config['ManialinkId'] . '01"></manialink>';
 }
 
 function chat_war($aseco, $command)
