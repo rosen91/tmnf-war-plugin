@@ -947,7 +947,7 @@ function chat_war($aseco, $command)
         case 'addteam':
             $warPlugin->createTeam($params, $command);
             break;
-        case 'addtag':
+        case 'addtags':
             $warPlugin->addTag($params, $command);
             break;
         case 'list':
