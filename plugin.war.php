@@ -249,6 +249,9 @@ class WarPlugin
         }
 
         $playerPoint = $this->getPlayerPointsPerMap($this->aseco->server->challenge->id, $player->id);
+        if (!$playerPoint) {
+            $playerPoint = 0;
+        }
 
         $sql = 'SELECT * from challenges';
         $res = $this->arrayQuery($sql);
