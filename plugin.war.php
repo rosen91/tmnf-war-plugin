@@ -20,6 +20,9 @@ class WarPlugin
     public $widgetsVisible = true;
     public $playerToggledWidgets = true;
     public $lastRedrawn = null;
+    public $tracklist = [];
+    public $tracklistString = '';
+    public $playerList = [];
 
     public function __construct($aseco)
     {
@@ -36,6 +39,30 @@ class WarPlugin
             }
             $this->xml = $xml_config;
         }
+    }
+
+    public function fetchInitialData()
+    {
+        // Get the Challenge List from Server
+        $this->aseco->client->resetError();
+        $this->aseco->client->query('GetChallengeList', 5000, 0);
+        $trackinfos = $this->aseco->client->getResponse();
+        $trackUIds = array_column($trackinfos, 'UId');
+        $mapsString = "'" . implode("','", $trackUIds) . "'";
+
+        $sql = 'SELECT * from challenges c where c.Uid IN (' . $mapsString . ')';
+        $res = $this->arrayQuery($sql);
+
+        $trackIds = array_column($res, 'Id');
+        $trackIdsString = "'" . implode("','", $trackIds) . "'";
+        $this->tracklist = $res;
+        $this->tracklistString = $trackIdsString;
+
+
+        $playerQuery = 'SELECT distinct p.* from players p LEFT JOIN records r on p.Id = r.PlayerId WHERE r.ChallengeId IN (' . $trackIdsString . ')';
+        $players = $this->arrayQuery($playerQuery);
+        $this->playerList = $players;
+        $this->playerListIds = array_column($players, 'Id');
     }
 
     private function isMasterAdmin($player)
@@ -220,7 +247,8 @@ class WarPlugin
         $query1 = 'SELECT * FROM war_settings';
         $resQ1 = $this->arrayQuery($query1);
 
-        $sql1 = 'SELECT r.PLayerID as player_id, r.Score as score From records r left join challenges c on r.ChallengeId = c.Id where r.ID IS NOT NULL AND c.id=' . $challengeId . ' ORDER BY Score ASC, Date ASC';
+
+        $sql1 = 'SELECT r.PLayerID as player_id, r.Score as score From records r left join challenges c on r.ChallengeId = c.Id where r.ID IS NOT NULL AND c.Id=' . $challengeId . ' ORDER BY Score ASC, Date ASC';
         $res1 = $this->arrayQuery($sql1);
 
         if (count($res1) === 0) {
@@ -253,7 +281,7 @@ class WarPlugin
             $playerPoint = 0;
         }
 
-        $sql = 'SELECT * from challenges';
+        $sql = 'SELECT * from challenges WHERE Id IN (' . $this->tracklistString . ')';
         $res = $this->arrayQuery($sql);
         $pPoints = 0;
         foreach ($res as $map) {
@@ -298,18 +326,21 @@ class WarPlugin
         $query = 'SELECT * FROM war_teams';
         $res = $this->arrayQuery($query);
 
-        $mapsQuery = 'SELECT * FROM challenges';
+        $mapsQuery = 'SELECT * FROM challenges WHERE Id IN (' . $this->tracklistString . ')';
         $maps = $this->arrayQuery($mapsQuery);
         $teams = [];
 
-        foreach ($res as $i => $team) {
-            $teams[$i]['team_name'] = $team['team_name'];
-            $teams[$i]['score'] = 0;
-            $teamPlayerQuery = 'SELECT * FROM war_team_players where team_id=' . $team['Id'];
-            $teamPlayers = $this->arrayQuery($teamPlayerQuery);
-            if (count($teamPlayers) > 0) {
-                foreach ($teamPlayers as $player) {
-                    $teams[$i]['score'] += $this->getPlayerPointsPerMap($this->aseco->server->challenge->id, $player['player_id']);
+        if (count($res)) {
+
+            foreach ($res as $i => $team) {
+                $teams[$i]['team_name'] = $team['team_name'];
+                $teams[$i]['score'] = 0;
+                $teamPlayerQuery = 'SELECT * FROM war_team_players where team_id=' . $team['Id'];
+                $teamPlayers = $this->arrayQuery($teamPlayerQuery);
+                if (count($teamPlayers) > 0) {
+                    foreach ($teamPlayers as $player) {
+                        $teams[$i]['score'] += $this->getPlayerPointsPerMap($this->aseco->server->challenge->id, $player['player_id']);
+                    }
                 }
             }
         }
@@ -325,10 +356,12 @@ class WarPlugin
 
         $xml .= '<label posn="0 -1" sizen="10 2" halign="center" valign="top" text="$o' . $this->xml->map_score_widget->title . '"/>';
         $posY = -2.6;
-        foreach ($teams as $team) {
-            $xml .= '<label posn="-4.3 ' . $posY . '" sizen="10 2" halign="left" textsize="1.2" valign="top" text="' . $team['team_name'] . ':"/>';
-            $xml .= '<label posn="4.3 ' . $posY . '" sizen="10 2" halign="right" textsize="1.2" valign="top" text="$fff' . $team['score'] . '"/>';
-            $posY = $posY - 2;
+        if (count($res)) {
+            foreach ($teams as $team) {
+                $xml .= '<label posn="-4.3 ' . $posY . '" sizen="10 2" halign="left" textsize="1.2" valign="top" text="' . $team['team_name'] . ':"/>';
+                $xml .= '<label posn="4.3 ' . $posY . '" sizen="10 2" halign="right" textsize="1.2" valign="top" text="$fff' . $team['score'] . '"/>';
+                $posY = $posY - 2;
+            }
         }
 
         $xml .= '</frame></manialink>';
@@ -345,20 +378,22 @@ class WarPlugin
 
         $query = 'SELECT * FROM war_teams';
         $res = $this->arrayQuery($query);
+        if (count($res)) {
 
-        $mapsQuery = 'SELECT * FROM challenges';
-        $maps = $this->arrayQuery($mapsQuery);
-        $teams = [];
+            $mapsQuery = 'SELECT * FROM challenges WHERE Id IN (' . $this->tracklistString . ')';
+            $maps = $this->arrayQuery($mapsQuery);
+            $teams = [];
 
-        foreach ($res as $i => $team) {
-            $teams[$i]['team_name'] = $team['team_name'];
-            $teams[$i]['score'] = 0;
-            $teamPlayerQuery = 'SELECT * FROM war_team_players where team_id=' . $team['Id'];
-            $teamPlayers = $this->arrayQuery($teamPlayerQuery);
-            if (count($teamPlayers) > 0) {
-                foreach ($maps as $map) {
-                    foreach ($teamPlayers as $player) {
-                        $teams[$i]['score'] += $this->getPlayerPointsPerMap($map['Id'], $player['player_id']);
+            foreach ($res as $i => $team) {
+                $teams[$i]['team_name'] = $team['team_name'];
+                $teams[$i]['score'] = 0;
+                $teamPlayerQuery = 'SELECT * FROM war_team_players where team_id=' . $team['Id'];
+                $teamPlayers = $this->arrayQuery($teamPlayerQuery);
+                if (count($teamPlayers) > 0) {
+                    foreach ($maps as $map) {
+                        foreach ($teamPlayers as $player) {
+                            $teams[$i]['score'] += $this->getPlayerPointsPerMap($map['Id'], $player['player_id']);
+                        }
                     }
                 }
             }
@@ -375,10 +410,12 @@ class WarPlugin
 
         $xml .= '<label posn="0 -1" sizen="10 2" halign="center" valign="top" text="$o' . $this->xml->war_score_widget->title . '"/>';
         $posY = -2.6;
-        foreach ($teams as $team) {
-            $xml .= '<label posn="-4.3 ' . $posY . '" sizen="10 2" halign="left" textsize="1.2" valign="top" text="' . $team['team_name'] . ':"/>';
-            $xml .= '<label posn="4.3 ' . $posY . '" sizen="10 2" halign="right" textsize="1.2" valign="top" text="$fff' . $team['score'] . '"/>';
-            $posY = $posY - 2;
+        if (count($res)) {
+            foreach ($teams as $team) {
+                $xml .= '<label posn="-4.3 ' . $posY . '" sizen="10 2" halign="left" textsize="1.2" valign="top" text="' . $team['team_name'] . ':"/>';
+                $xml .= '<label posn="4.3 ' . $posY . '" sizen="10 2" halign="right" textsize="1.2" valign="top" text="$fff' . $team['score'] . '"/>';
+                $posY = $posY - 2;
+            }
         }
 
         $xml .= '</frame></manialink>';
@@ -423,7 +460,6 @@ class WarPlugin
         unset($player);
 
         $playerRecs = $this->getPlayerRecs();
-
 
         $rank = 1;
         $line = 0;
@@ -501,14 +537,18 @@ class WarPlugin
         $player = $command['author'];
         $query = 'SELECT * FROM `war_teams`';
         $result = $this->arrayQuery($query);
-        $msg = $this->chatPrefix . 'This is the registered teams: ';
-        foreach ($result as $team) {
-            $msg .= $team['Id'] . ': ' .  $team['team_name'] . '$z$s$fff (' . $team['team_identifiers'] . '), ';
+        if (count($result)) {
+            $msg = $this->chatPrefix . 'This is the registered teams: ';
+            foreach ($result as $team) {
+                $msg .= $team['Id'] . ': ' .  $team['team_name'] . '$z$s$fff (' . $team['team_identifiers'] . '), ';
+            }
+
+            $msg = rtrim($msg, ', ');
+
+            $this->aseco->client->query('ChatSendServerMessageToLogin', $this->aseco->formatColors($msg), $player->login);
+        } else {
+            $this->aseco->client->query('ChatSendServerMessageToLogin', $this->aseco->formatColors($this->chatPrefix . 'No registered teams'), $player->login);
         }
-
-        $msg = rtrim($msg, ', ');
-
-        $this->aseco->client->query('ChatSendServerMessageToLogin', $this->aseco->formatColors($msg), $player->login);
     }
 
     public function addPlayer($params, $command)
@@ -627,11 +667,13 @@ class WarPlugin
             $nickname = $player->nickname;
             $sql = "SELECT * FROM war_teams";
             $res = $this->arrayQuery($sql);
-            foreach ($res as $team) {
-                $ids = explode(",", $team['team_identifiers']);
-                foreach ($ids as $id) {
-                    if (strpos($nickname, $id) !== false) {
-                        $matchedTeam = $team;
+            if (count($res)) {
+                foreach ($res as $team) {
+                    $ids = explode(",", $team['team_identifiers']);
+                    foreach ($ids as $id) {
+                        if (strpos($nickname, $id) !== false) {
+                            $matchedTeam = $team;
+                        }
                     }
                 }
             }
@@ -694,14 +736,6 @@ class WarPlugin
 
     public function drawSidebar()
     {
-        // $xml = '<?xml version="1.0" encoding="UTF-8"';
-        // $xml .= '<manialink id="123123421">';
-        // $xml .= '<frame posn="-49.2 -10.7">';
-
-        // $xml .= '<quad posn="0 0" sizen="15.5 15.5" style="Bgs1InRace" substyle="NavButton"/>';
-
-        // $xml .= '</frame></manialink>';
-
         global $re_config;
 
         if ($this->xml->sidebar_widget->enabled == false || $this->xml->sidebar_widget->enabled == 'false') {
@@ -835,11 +869,12 @@ class WarPlugin
 
     private function getPlayerRecs()
     {
-        $q1 = 'SELECT * FROM players';
+        $q1 = 'SELECT * FROM players WHERE Id IN (' . implode(',', $this->playerListIds) . ')';
         $playerList = $this->arrayQuery($q1);
 
-        $sql = 'SELECT * from challenges';
+        $sql = 'SELECT * from challenges WHERE Id IN (' . $this->tracklistString . ')';
         $res = $this->arrayQuery($sql);
+
         $pPoints = 0;
         $playerRecs = [];
         foreach ($playerList as $player) {
@@ -858,7 +893,7 @@ class WarPlugin
         return $playerRecs;
     }
 
-    private function arrayQuery($query)
+    public function arrayQuery($query)
     {
         $q = mysql_query($query);
         $error = mysql_error();
@@ -883,6 +918,8 @@ function war_setup($aseco)
     global $warPlugin;
     $warPlugin = new WarPlugin($aseco);
     $warPlugin->setupDb();
+    $warPlugin->fetchInitialData();
+
     $warPlugin->redrawWidgets(null);
 }
 
@@ -896,6 +933,7 @@ function war_playerConnected($aseco, $player)
 function war_updateWidgets($aseco, $record)
 {
     global $warPlugin;
+    $warPlugin->fetchInitialData();
     $warPlugin->redrawWidgets(null);
 }
 
