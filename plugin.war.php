@@ -2,12 +2,21 @@
 
 Aseco::registerEvent('onSync', 'war_setup');
 Aseco::registerEvent('onPlayerConnect', 'war_playerConnected');
-Aseco::registerEvent('onPlayerFinish', 'war_updateWidgets');
+Aseco::registerEvent('onPlayerDisconnect', 'war_playerDisconnected');
+Aseco::registerEvent('onLocalRecord', 'war_updateWidgets');
 Aseco::registerEvent('onPlayerManialinkPageAnswer', 'war_toggleWindow');
-Aseco::registerEvent('onNewChallenge', 'war_loadxml');
+Aseco::registerEvent('onNewChallenge2', 'war_onNewChallenge');
 Aseco::registerEvent('onEndRace', 'war_onEndRace');
-
+Aseco::registerEvent('onTracklistChanged', 'war_onTracklistChanged');
 Aseco::addChatCommand('war', 'Manage war commands');
+
+
+class WarPlayer
+{
+    public $login;
+    public $id;
+    public $showWidgets;
+}
 
 class WarPlugin
 {
@@ -23,11 +32,18 @@ class WarPlugin
     public $tracklist = [];
     public $tracklistString = '';
     public $playerList = [];
+    public $onlinePlayerList = [];
+    public $warTeams = [];
 
     public function __construct($aseco)
     {
         $this->aseco = $aseco;
         $this->loadXmlFile();
+    }
+
+    public function setAseco($aseco)
+    {
+        $this->aseco = $aseco;
     }
 
     public function loadXmlFile()
@@ -50,7 +66,7 @@ class WarPlugin
         $trackUIds = array_column($trackinfos, 'UId');
         $mapsString = "'" . implode("','", $trackUIds) . "'";
 
-        $sql = 'SELECT * from challenges c where c.Uid IN (' . $mapsString . ')';
+        $sql = 'SELECT * from challenges where Uid IN (' . $mapsString . ')';
         $res = $this->arrayQuery($sql);
 
         $trackIds = array_column($res, 'Id');
@@ -58,11 +74,19 @@ class WarPlugin
         $this->tracklist = $res;
         $this->tracklistString = $trackIdsString;
 
-
         $playerQuery = 'SELECT distinct p.* from players p LEFT JOIN records r on p.Id = r.PlayerId WHERE r.ChallengeId IN (' . $trackIdsString . ')';
         $players = $this->arrayQuery($playerQuery);
         $this->playerList = $players;
         $this->playerListIds = array_column($players, 'Id');
+
+        $this->updateTeams();
+    }
+
+    private function updateTeams()
+    {
+        $query = 'SELECT * FROM war_teams';
+        $res = $this->arrayQuery($query);
+        $this->warTeams = $res;
     }
 
     private function isMasterAdmin($player)
@@ -104,6 +128,7 @@ class WarPlugin
                 `Id` mediumint(9) NOT NULL auto_increment,
                 `team_identifiers` varchar(200) NOT NULL default '',
                 `team_name` varchar(200) NOT NULL default '',
+                `team_short` varchar(200) NOT NULL default '',
                 `team_avg` float NOT NULL default '" . ($maxrecs * 10000) . "',
                 PRIMARY KEY (`Id`)
             ) ENGINE=MyISAM AUTO_INCREMENT=1 DEFAULT CHARSET=utf8;";
@@ -135,34 +160,72 @@ class WarPlugin
             $sql1 = 'INSERT INTO war_settings (max_point_positions) VALUES (10)';
             mysql_query($sql1);
         }
+
+        $hasTeamShortQuery = mysql_query('SHOW COLUMNS FROM `war_teans`;');
+        while ($row = mysql_fetch_row($result)) {
+            $fields[] = $row[0];
+        }
+        mysql_free_result($result);
+
+        // Add `timezone` column if not yet done
+        if (!in_array('team_short', $fields)) {
+            $this->aseco->console('   + Adding column `team_short` at table `war_teams`.');
+            mysql_query('ALTER TABLE `war_teams` ADD `team_short` VARCHAR(200) CHARACTER SET utf8 COLLATE utf8_bin NULL DEFAULT "" COMMENT "Added by plugin.war.php";');
+        }
+    }
+
+    public function addShort($params, $command)
+    {
+        $player = $command['author'];
+        if (!$this->isCaptainOrMasterAdmin($player)) {
+            $this->aseco->client->query('ChatSendServerMessageToLogin', $this->aseco->formatColors($this->chatPrefix . 'You don’t have permission to use that command.'), $player->login);
+            return;
+        }
+
+        $team = array_shift($params);
+        $shortName = $params[0];
+
+        $query = 'UPDATE war_teams set team_short="' . $shortName . '" where id=' . $team . '';
+
+        $result = mysql_query($query);
+
+        $this->updateTeams();
+        $this->redrawWidgets(null, true);
+
+        $this->aseco->client->query('ChatSendServerMessageToLogin', $this->aseco->formatColors($this->chatPrefix . 'Team: ' . $team . '$z$s$fff has the new short name: ' . $shortName . ''), $player->login);
     }
 
     public function redrawWidgets($playerObject, $force = false)
     {
-        if ($this->playerToggledWidgets === false || $this->widgetsVisible === false) {
+        if ($this->widgetsVisible === false) {
             return;
         }
+        var_dump('RELOADING WIDGETS');
+
         if ($this->lastRedrawn && !$force) {
-            if (time() - $this->lastRedrawn < 2) {
+            if (time() - $this->lastRedrawn < 1) {
                 $timePassed = time() - $this->lastRedrawn;
                 return;
             }
         }
         $xml = '';
+        var_dump('SENDING ON NEW CHALLGENGE' . count($this->onlinePlayerList));
+        foreach ($this->onlinePlayerList as $player) {
+            if ($player->showWidgets) {
 
-        foreach ($this->aseco->server->players->player_list as $player) {
-            $this->sendManialinks($this->drawPlayerScoreWidget($player), $player->login);
-        }
-
-        $xml .= $this->drawSidebar();
-        if ($this->getWarMode() === 'team') {
-            $xml .= $this->drawMapScoreWidget();
-            $xml .= $this->drawTeamsWidget();
-        }
-        if ($playerObject !== null) {
-            $this->sendManialinks($xml, $playerObject->login);
-        } else {
-            $this->sendManialinks($xml);
+                $this->sendManialinks($this->drawPlayerScoreWidget($player), $player->login);
+                $xml .= $this->drawSidebar($player);
+                if ($this->getWarMode() === 'team') {
+                    $xml .= $this->drawMapScoreWidget($player);
+                    $xml .= $this->drawTeamsWidget($player);
+                }
+                //if ($playerObject !== null) {
+                var_dump('SENDING MANIALINKS TO PLAYER' . $player->login);
+                $this->sendManialinks($xml, $player->login);
+                //} else {
+                //$this->sendManialinks($xml);
+                //}
+            }
         }
 
         $this->lastRedrawn = time();
@@ -173,12 +236,17 @@ class WarPlugin
         if (!$this->widgetsVisible) {
             return;
         }
-        if ($this->playerToggledWidgets) {
-            $this->playerToggledWidgets = false;
-            $this->hideWidgets($player);
-        } else {
-            $this->playerToggledWidgets = true;
-            $this->showWidgets($player);
+
+        foreach ($this->onlinePlayerList as $onlinePlayer) {
+            if ($onlinePlayer->login === $player->login) {
+                if ($onlinePlayer->showWidgets === true) {
+                    $onlinePlayer->showWidgets = false;
+                    $this->hideWidgets($player);
+                } else {
+                    $onlinePlayer->showWidgets = true;
+                    $this->showWidgets($player);
+                }
+            }
         }
     }
 
@@ -196,6 +264,25 @@ class WarPlugin
         $this->redrawWidgets($player);
     }
 
+    public function addOnlinePlayer($player)
+    {
+        $warPlayer = new WarPlayer;
+        $warPlayer->login = $player->login;
+        $warPlayer->id = $player->id;
+        $warPlayer->showWidgets = true;
+
+        $this->onlinePlayerList[] = $warPlayer;
+    }
+
+    public function removeOnlinePlayer($player)
+    {
+        foreach ($this->onlinePlayerList as $key => $onlinePlayer) {
+            if ($onlinePlayer->login === $player->login) {
+                unset($this->onlinePlayerList[$key]);
+            }
+        }
+    }
+
     public function createTeam($params, $command)
     {
         $player = $command['author'];
@@ -210,6 +297,9 @@ class WarPlugin
         $query = 'INSERT INTO `war_teams` (team_identifiers, team_name) VALUES (' . quotedString(implode(",", $identifiers)) . ',' . quotedString($team) . ')';
 
         $result = mysql_query($query);
+
+        $this->updateTeams();
+        $this->redrawWidgets(null, true);
 
         $this->aseco->client->query('ChatSendServerMessageToLogin', $this->aseco->formatColors($this->chatPrefix . 'Team: ' . $team . '$z$s$fff added, with identifiers: ' . implode(', ', $identifiers)), $player->login);
     }
@@ -238,7 +328,7 @@ class WarPlugin
             $msg = $this->chatPrefix . 'No team found with that ID';
         }
 
-
+        $this->updateTeams();
         $this->aseco->client->query('ChatSendServerMessageToLogin', $this->aseco->formatColors($msg), $player->login);
     }
 
@@ -272,19 +362,19 @@ class WarPlugin
 
     public function drawPlayerScoreWidget($player)
     {
-        if ($this->xml->your_score_widget->enabled == false || $this->xml->your_score_widget->enabled == 'false') {
+        if ($this->xml->your_score_widget->enabled == false || $this->xml->your_score_widget->enabled == 'false' || $player->showWidgets === false) {
             return;
         }
+
+        var_dump($this->aseco->server->challenge->id);
 
         $playerPoint = $this->getPlayerPointsPerMap($this->aseco->server->challenge->id, $player->id);
         if (!$playerPoint) {
             $playerPoint = 0;
         }
 
-        $sql = 'SELECT * from challenges WHERE Id IN (' . $this->tracklistString . ')';
-        $res = $this->arrayQuery($sql);
         $pPoints = 0;
-        foreach ($res as $map) {
+        foreach ($this->tracklist as $map) {
             $pPoints += $this->getPlayerPointsPerMap($map['Id'], $player->id);
         }
         $playerScoreWidgetHeight = 7;
@@ -316,23 +406,18 @@ class WarPlugin
         return $xml;
     }
 
-    public function drawMapScoreWidget()
+    public function drawMapScoreWidget($player)
     {
-        if ($this->xml->map_score_widget->enabled == false || $this->xml->map_score_widget->enabled == 'false') {
+        if ($this->xml->map_score_widget->enabled == false || $this->xml->map_score_widget->enabled == 'false' || $player->showWidgets === false) {
             return;
         }
         $boxHeight = 3;
 
-        $query = 'SELECT * FROM war_teams';
-        $res = $this->arrayQuery($query);
-
-        $mapsQuery = 'SELECT * FROM challenges WHERE Id IN (' . $this->tracklistString . ')';
-        $maps = $this->arrayQuery($mapsQuery);
         $teams = [];
 
-        if (count($res)) {
+        if (count($this->warTeams)) {
 
-            foreach ($res as $i => $team) {
+            foreach ($this->warTeams as $i => $team) {
                 $teams[$i]['team_name'] = $team['team_name'];
                 $teams[$i]['score'] = 0;
                 $teamPlayerQuery = 'SELECT * FROM war_team_players where team_id=' . $team['Id'];
@@ -346,7 +431,7 @@ class WarPlugin
         }
 
         // Team score widgeten
-        $boxHeight = (count($res) * 2) + $boxHeight;
+        $boxHeight = (count($this->warTeams) * 2) + $boxHeight;
         $xml = '<?xml version="1.0" encoding="UTF-8"?>';
         $xml .= '<manialink id="' . $this->manialinkPrefix . $this->manialinks['mapscore_widget'] . '">';
         $xml .= '<frame posn="' . $this->xml->map_score_widget->pos_x . ' ' . $this->xml->map_score_widget->pos_y . '">';
@@ -356,7 +441,7 @@ class WarPlugin
 
         $xml .= '<label posn="0 -1" sizen="10 2" halign="center" valign="top" text="$o' . $this->xml->map_score_widget->title . '"/>';
         $posY = -2.6;
-        if (count($res)) {
+        if (count($this->warTeams)) {
             foreach ($teams as $team) {
                 $xml .= '<label posn="-4.3 ' . $posY . '" sizen="10 2" halign="left" textsize="1.2" valign="top" text="' . $team['team_name'] . ':"/>';
                 $xml .= '<label posn="4.3 ' . $posY . '" sizen="10 2" halign="right" textsize="1.2" valign="top" text="$fff' . $team['score'] . '"/>';
@@ -369,28 +454,23 @@ class WarPlugin
         return $xml;
     }
 
-    public function drawTeamsWidget()
+    public function drawTeamsWidget($player)
     {
-        if ($this->xml->war_score_widget->enabled == false || $this->xml->war_score_widget->enabled == 'false') {
+        if ($this->xml->war_score_widget->enabled == false || $this->xml->war_score_widget->enabled == 'false' || $player->showWidgets === false) {
             return;
         }
         $boxHeight = 3;
 
-        $query = 'SELECT * FROM war_teams';
-        $res = $this->arrayQuery($query);
-        if (count($res)) {
-
-            $mapsQuery = 'SELECT * FROM challenges WHERE Id IN (' . $this->tracklistString . ')';
-            $maps = $this->arrayQuery($mapsQuery);
+        if (count($this->warTeams)) {
             $teams = [];
 
-            foreach ($res as $i => $team) {
+            foreach ($this->warTeams as $i => $team) {
                 $teams[$i]['team_name'] = $team['team_name'];
                 $teams[$i]['score'] = 0;
                 $teamPlayerQuery = 'SELECT * FROM war_team_players where team_id=' . $team['Id'];
                 $teamPlayers = $this->arrayQuery($teamPlayerQuery);
                 if (count($teamPlayers) > 0) {
-                    foreach ($maps as $map) {
+                    foreach ($this->tracklist as $map) {
                         foreach ($teamPlayers as $player) {
                             $teams[$i]['score'] += $this->getPlayerPointsPerMap($map['Id'], $player['player_id']);
                         }
@@ -400,7 +480,7 @@ class WarPlugin
         }
 
         // Team score widgeten
-        $boxHeight = (count($res) * 2) + $boxHeight;
+        $boxHeight = (count($this->warTeams) * 2) + $boxHeight;
         $xml = '<?xml version="1.0" encoding="UTF-8"?>';
         $xml .= '<manialink id="' . $this->manialinkPrefix . $this->manialinks['teamscore_widget'] . '">';
         $xml .= '<frame posn="' . $this->xml->war_score_widget->pos_x . ' ' . $this->xml->war_score_widget->pos_y . '">';
@@ -410,7 +490,7 @@ class WarPlugin
 
         $xml .= '<label posn="0 -1" sizen="10 2" halign="center" valign="top" text="$o' . $this->xml->war_score_widget->title . '"/>';
         $posY = -2.6;
-        if (count($res)) {
+        if (count($this->warTeams)) {
             foreach ($teams as $team) {
                 $xml .= '<label posn="-4.3 ' . $posY . '" sizen="10 2" halign="left" textsize="1.2" valign="top" text="' . $team['team_name'] . ':"/>';
                 $xml .= '<label posn="4.3 ' . $posY . '" sizen="10 2" halign="right" textsize="1.2" valign="top" text="$fff' . $team['score'] . '"/>';
@@ -529,17 +609,18 @@ class WarPlugin
 
         $msg = $this->chatPrefix . 'War has been reset';
 
+        $this->updateTeams();
+        $this->fetchInitialData();
+
         $this->aseco->client->query('ChatSendServerMessageToLogin', $this->aseco->formatColors($msg), $player->login);
     }
 
     public function listTeams($command)
     {
         $player = $command['author'];
-        $query = 'SELECT * FROM `war_teams`';
-        $result = $this->arrayQuery($query);
-        if (count($result)) {
+        if (count($this->warTeams)) {
             $msg = $this->chatPrefix . 'This is the registered teams: ';
-            foreach ($result as $team) {
+            foreach ($this->warTeams as $team) {
                 $msg .= $team['Id'] . ': ' .  $team['team_name'] . '$z$s$fff (' . $team['team_identifiers'] . '), ';
             }
 
@@ -665,10 +746,8 @@ class WarPlugin
         } else {
             $matchedTeam = null;
             $nickname = $player->nickname;
-            $sql = "SELECT * FROM war_teams";
-            $res = $this->arrayQuery($sql);
-            if (count($res)) {
-                foreach ($res as $team) {
+            if (count($this->warTeams)) {
+                foreach ($this->warTeams as $team) {
                     $ids = explode(",", $team['team_identifiers']);
                     foreach ($ids as $id) {
                         if (strpos($nickname, $id) !== false) {
@@ -734,11 +813,11 @@ class WarPlugin
         return $this->warmode;
     }
 
-    public function drawSidebar()
+    public function drawSidebar($player)
     {
         global $re_config;
 
-        if ($this->xml->sidebar_widget->enabled == false || $this->xml->sidebar_widget->enabled == 'false') {
+        if ($this->xml->sidebar_widget->enabled == false || $this->xml->sidebar_widget->enabled == 'false' || $player->showWidgets === false) {
             return;
         }
 
@@ -869,17 +948,13 @@ class WarPlugin
 
     private function getPlayerRecs()
     {
-        $q1 = 'SELECT * FROM players WHERE Id IN (' . implode(',', $this->playerListIds) . ')';
-        $playerList = $this->arrayQuery($q1);
-
-        $sql = 'SELECT * from challenges WHERE Id IN (' . $this->tracklistString . ')';
-        $res = $this->arrayQuery($sql);
+        $playerList = $this->playerList;
 
         $pPoints = 0;
         $playerRecs = [];
         foreach ($playerList as $player) {
             $pPoints = 0;
-            foreach ($res as $map) {
+            foreach ($this->tracklist as $map) {
                 $pPoints += $this->getPlayerPointsPerMap($map['Id'], $player['Id']);
             }
             $playerRecs[] = ['nickname' => $player['NickName'], 'login' => $player['Login'], 'points' => $pPoints];
@@ -926,28 +1001,41 @@ function war_setup($aseco)
 function war_playerConnected($aseco, $player)
 {
     global $warPlugin;
+    $warPlugin->addOnlinePlayer($player);
     $warPlugin->addPlayerToTeam($player);
     $warPlugin->redrawWidgets($player, true);
 }
 
+function war_playerDisconnected($aseco, $player)
+{
+    global $warPlugin;
+    $warPlugin->removeOnlinePlayer($player);
+}
 function war_updateWidgets($aseco, $record)
 {
     global $warPlugin;
-    $warPlugin->fetchInitialData();
     $warPlugin->redrawWidgets(null);
 }
 
-function war_loadxml($aseco, $tab)
+function war_onNewChallenge($aseco, $tab)
 {
     global $warPlugin;
-    $warPlugin->loadXmlFile();
+    $warPlugin->setAseco($aseco);
+    $warPlugin->fetchInitialData();
     $warPlugin->showWidgets(null);
+    $warPlugin->redrawWidgets(null, true);
 }
 
 function war_onEndRace($aseco, $race)
 {
     global $warPlugin;
-    $warPlugin->hideWidgets();
+    $warPlugin->hideWidgets(null);
+}
+
+function war_onTracklistChanged($aseco, $command)
+{
+    global $warPlugin;
+    $warPlugin->fetchInitialData();
 }
 
 
@@ -990,6 +1078,9 @@ function chat_war($aseco, $command)
             break;
         case 'addtags':
             $warPlugin->addTag($params, $command);
+            break;
+        case 'addshort':
+            $warPlugin->addShort($params, $command);
             break;
         case 'list':
             $warPlugin->listTeams($command);
