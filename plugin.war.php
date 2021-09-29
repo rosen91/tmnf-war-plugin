@@ -197,10 +197,9 @@ class WarPlugin
 
     public function redrawWidgets($playerObject, $force = false)
     {
-        if ($this->widgetsVisible === false) {
+        if ($this->widgetsVisible === false || $this->aseco->startup_phase) {
             return;
         }
-        var_dump('RELOADING WIDGETS');
 
         if ($this->lastRedrawn && !$force) {
             if (time() - $this->lastRedrawn < 1) {
@@ -209,7 +208,6 @@ class WarPlugin
             }
         }
         $xml = '';
-        var_dump('SENDING ON NEW CHALLGENGE' . count($this->onlinePlayerList));
         foreach ($this->onlinePlayerList as $player) {
             if ($player->showWidgets) {
 
@@ -219,12 +217,7 @@ class WarPlugin
                     $xml .= $this->drawMapScoreWidget($player);
                     $xml .= $this->drawTeamsWidget($player);
                 }
-                //if ($playerObject !== null) {
-                var_dump('SENDING MANIALINKS TO PLAYER' . $player->login);
                 $this->sendManialinks($xml, $player->login);
-                //} else {
-                //$this->sendManialinks($xml);
-                //}
             }
         }
 
@@ -1003,7 +996,9 @@ function war_playerConnected($aseco, $player)
     global $warPlugin;
     $warPlugin->addOnlinePlayer($player);
     $warPlugin->addPlayerToTeam($player);
+    $time_start = microtime(true);
     $warPlugin->redrawWidgets($player, true);
+    echo 'redrawWidgets: ' . (microtime(true) - $time_start);
 }
 
 function war_playerDisconnected($aseco, $player)
@@ -1023,7 +1018,9 @@ function war_onNewChallenge($aseco, $tab)
     $warPlugin->setAseco($aseco);
     $warPlugin->fetchInitialData();
     $warPlugin->showWidgets(null);
+    $time_start = microtime(true);
     $warPlugin->redrawWidgets(null, true);
+    echo 'war_onNewChallenge_redrawWidgets: ' . (microtime(true) - $time_start);
 }
 
 function war_onEndRace($aseco, $race)
