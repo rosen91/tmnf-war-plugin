@@ -8,7 +8,7 @@ This was built by drunk **Pensio** and **Oscar** in 2 nights, the code is horrib
 1. Download the [latest release](https://github.com/rosen91/tmnf-war-plugin/archive/refs/heads/master.zip)
 2. Unzip and move `plugin.war.php` into /xaseco/plugins
 3. Move war.xml into the root of xaseco
-4. Edit `plugins.xml` and include `<plugins>plugin.war.php</plugins>`
+4. Edit `plugins.xml` and include `<plugin>plugin.war.php</plugin>`
 5. Restart XAseco
 
 ## Usage
@@ -22,7 +22,7 @@ By default this plugin has a widget that shows up under dedimania-records on the
 
 ## Commands
 ```/war mode <mode>```  
-Switch the mode between `team` and `all` depending if you want to run in team or all vs all mode. 
+Switch the mode between `team` and `all` depending if you want to run in team or all vs all mode.  
 *Usable by MasterAdmin*
 
 ```/war list```  
