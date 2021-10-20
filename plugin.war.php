@@ -208,20 +208,66 @@ class WarPlugin
             }
         }
         $xml = '';
+
+        $mapScore = $this->calculateMapScore();
+        $teamScore = $this->calculateTeamScore();
+        $playerRecs = $this->getPlayerRecs();
         foreach ($this->onlinePlayerList as $player) {
             if ($player->showWidgets) {
 
                 $this->sendManialinks($this->drawPlayerScoreWidget($player), $player->login);
-                $xml .= $this->drawSidebar($player);
+                $xml .= $this->drawSidebar($player, $playerRecs);
                 if ($this->getWarMode() === 'team') {
-                    $xml .= $this->drawMapScoreWidget($player);
-                    $xml .= $this->drawTeamsWidget($player);
+                    $xml .= $this->drawMapScoreWidget($player, $mapScore);
+                    $xml .= $this->drawTeamsWidget($player, $teamScore);
                 }
                 $this->sendManialinks($xml, $player->login);
             }
         }
 
         $this->lastRedrawn = time();
+    }
+
+    private function calculateTeamScore()
+    {
+        $teams = [];
+        if (count($this->warTeams)) {
+            foreach ($this->warTeams as $i => $team) {
+                $teams[$i]['team_name'] = $team['team_name'];
+                $teams[$i]['score'] = 0;
+                $teamPlayerQuery = 'SELECT * FROM war_team_players where team_id=' . $team['Id'];
+                $teamPlayers = $this->arrayQuery($teamPlayerQuery);
+                if (count($teamPlayers) > 0) {
+                    foreach ($this->tracklist as $map) {
+                        foreach ($teamPlayers as $player) {
+                            $teams[$i]['score'] += $this->getPlayerPointsPerMap($map['Id'], $player['player_id']);
+                        }
+                    }
+                }
+            }
+        }
+
+        return $teams;
+    }
+
+    private function calculateMapScore()
+    {
+        $teams = [];
+        if (count($this->warTeams)) {
+            foreach ($this->warTeams as $i => $team) {
+                $teams[$i]['team_name'] = $team['team_name'];
+                $teams[$i]['score'] = 0;
+                $teamPlayerQuery = 'SELECT * FROM war_team_players where team_id=' . $team['Id'];
+                $teamPlayers = $this->arrayQuery($teamPlayerQuery);
+                if (count($teamPlayers) > 0) {
+                    foreach ($teamPlayers as $player) {
+                        $teams[$i]['score'] += $this->getPlayerPointsPerMap($this->aseco->server->challenge->id, $player['player_id']);
+                    }
+                }
+            }
+        }
+
+        return $teams;
     }
 
     public function toggleWidgets($player)
@@ -359,16 +405,15 @@ class WarPlugin
             return;
         }
 
-        var_dump($this->aseco->server->challenge->id);
-
-        $playerPoint = $this->getPlayerPointsPerMap($this->aseco->server->challenge->id, $player->id);
-        if (!$playerPoint) {
-            $playerPoint = 0;
-        }
-
+        $playerPoint = 0;
         $pPoints = 0;
+        $currentMapId = $this->aseco->server->challenge->id;
         foreach ($this->tracklist as $map) {
-            $pPoints += $this->getPlayerPointsPerMap($map['Id'], $player->id);
+            $points = $this->getPlayerPointsPerMap($map['Id'], $player->id);
+            $pPoints += $points;
+            if ($map['Id'] == $currentMapId) {
+                $playerPoint = $points;
+            }
         }
         $playerScoreWidgetHeight = 7;
 
@@ -399,29 +444,12 @@ class WarPlugin
         return $xml;
     }
 
-    public function drawMapScoreWidget($player)
+    public function drawMapScoreWidget($player, $teams = [])
     {
         if ($this->xml->map_score_widget->enabled == false || $this->xml->map_score_widget->enabled == 'false' || $player->showWidgets === false) {
             return;
         }
         $boxHeight = 3;
-
-        $teams = [];
-
-        if (count($this->warTeams)) {
-
-            foreach ($this->warTeams as $i => $team) {
-                $teams[$i]['team_name'] = $team['team_name'];
-                $teams[$i]['score'] = 0;
-                $teamPlayerQuery = 'SELECT * FROM war_team_players where team_id=' . $team['Id'];
-                $teamPlayers = $this->arrayQuery($teamPlayerQuery);
-                if (count($teamPlayers) > 0) {
-                    foreach ($teamPlayers as $player) {
-                        $teams[$i]['score'] += $this->getPlayerPointsPerMap($this->aseco->server->challenge->id, $player['player_id']);
-                    }
-                }
-            }
-        }
 
         // Team score widgeten
         $boxHeight = (count($this->warTeams) * 2) + $boxHeight;
@@ -447,30 +475,12 @@ class WarPlugin
         return $xml;
     }
 
-    public function drawTeamsWidget($player)
+    public function drawTeamsWidget($player, $teams)
     {
         if ($this->xml->war_score_widget->enabled == false || $this->xml->war_score_widget->enabled == 'false' || $player->showWidgets === false) {
             return;
         }
         $boxHeight = 3;
-
-        if (count($this->warTeams)) {
-            $teams = [];
-
-            foreach ($this->warTeams as $i => $team) {
-                $teams[$i]['team_name'] = $team['team_name'];
-                $teams[$i]['score'] = 0;
-                $teamPlayerQuery = 'SELECT * FROM war_team_players where team_id=' . $team['Id'];
-                $teamPlayers = $this->arrayQuery($teamPlayerQuery);
-                if (count($teamPlayers) > 0) {
-                    foreach ($this->tracklist as $map) {
-                        foreach ($teamPlayers as $player) {
-                            $teams[$i]['score'] += $this->getPlayerPointsPerMap($map['Id'], $player['player_id']);
-                        }
-                    }
-                }
-            }
-        }
 
         // Team score widgeten
         $boxHeight = (count($this->warTeams) * 2) + $boxHeight;
@@ -712,6 +722,32 @@ class WarPlugin
         }
     }
 
+    public function showPlayerInfo($params, $command)
+    {
+        $player = $command['author'];
+        if (!$this->isCaptainOrMasterAdmin($player)) {
+            $this->aseco->client->query('ChatSendServerMessageToLogin', $this->aseco->formatColors($this->chatPrefix . 'You don’t have permission to use that command.'), $player->login);
+            return;
+        }
+        $playerQuery = 'SELECT * from players where Login="' . $params[0] . '"';
+        $res = $this->arrayQuery($playerQuery);
+        if (count($res)) {
+
+            $teamQuery = 'SELECT war_teams.team_name as team_name, war_team_players.player_id as player_id from war_team_players join war_teams on war_team_players.team_id=war_teams.Id where war_team_players.player_id=' . $res[0]['Id'];
+            $teamRes = $this->arrayQuery($teamQuery);
+            if (count($teamRes)) {
+                $msg = $this->chatPrefix . $res[0]['NickName'] . '$z$s$fff with login: ' . $res[0]['Login'] . ' is in team: ' . $teamRes[0]['team_name'];
+                $this->aseco->client->query('ChatSendServerMessage', $this->aseco->formatColors($msg));
+            } else {
+                $msg = $this->chatPrefix . 'Player does not belong to a team';
+                $this->aseco->client->query('ChatSendServerMessageToLogin', $this->aseco->formatColors($msg), $player->login);
+            }
+        } else {
+            $msg = $this->chatPrefix . 'No player found with that login';
+            $this->aseco->client->query('ChatSendServerMessageToLogin', $this->aseco->formatColors($msg), $player->login);
+        }
+    }
+
     public function updateSettings($params, $command)
     {
         $player = $command['author'];
@@ -806,7 +842,7 @@ class WarPlugin
         return $this->warmode;
     }
 
-    public function drawSidebar($player)
+    public function drawSidebar($player, $playerRecs)
     {
         global $re_config;
 
@@ -909,8 +945,6 @@ class WarPlugin
 
         $build['footer'] = $footer;
         $build['body'] = '';
-
-        $playerRecs = $this->getPlayerRecs();
 
         $limit = $this->xml->sidebar_widget->entries;
         if (count($playerRecs) > 0) {
@@ -1081,6 +1115,9 @@ function chat_war($aseco, $command)
             break;
         case 'list':
             $warPlugin->listTeams($command);
+            break;
+        case 'playerinfo':
+            $warPlugin->showPlayerInfo($params, $command);
             break;
         case 'maxpoints':
             $warPlugin->updateSettings($params, $command);
