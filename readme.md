@@ -4,6 +4,8 @@ Plugin for team points system in Trackmania Nations Forever wars.
 ### Disclaimer
 This was built by drunk **Pensio** and **Oscar** in 2 nights, the code is horrible but it all should work and not slow down the servers. If any issues arise, post an issue here on github and we'll look at it.
 
+Requires PHP5.5 or higher.
+
 ## Installation
 1. Download the [latest release](https://github.com/rosen91/tmnf-war-plugin/archive/refs/heads/master.zip)
 2. Unzip and move `plugin.war.php` into /xaseco/plugins
@@ -28,6 +30,10 @@ Switch the mode between `team` and `all` depending if you want to run in team or
 ```/war list```  
 Lists all teams in the war with ID, name and identifiers. Example: `1: Faint (Faint, FNT, F)`  
 *Usable by everyone*
+
+```/war playerinfo <login>```  
+Returns playername, login and team.  
+*Usable by everyone*  
 
 ```/war addteam <teamname> <identifier>```  
 Adds team to war. Commands accepts multiple idendifiers in the same line, separate with blank space.  
