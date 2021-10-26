@@ -810,6 +810,50 @@ class WarPlugin
         }
     }
 
+    public function syncPlayers($command) 
+    {
+        $author = $command['author'];
+        if (!$this->isMasterAdmin($author)) {
+            $this->aseco->client->query('ChatSendServerMessageToLogin', $this->aseco->formatColors($this->chatPrefix . 'You don’t have permission to use that command.'), $author->login);
+            return;
+        }
+        $query = 'SELECT * from players;';
+        $res = $this->arrayQuery($query);
+        foreach ($res as $player) {
+            $query = 'SELECT war_teams.team_name as team_name, war_team_players.player_id as player_id from war_team_players join war_teams on war_team_players.team_id=war_teams.Id where war_team_players.player_id=' . $player['Id'];
+            $res = $this->arrayQuery($query);
+            if (count($res) > 0) {
+                $msg = $this->chatPrefix . 'Welcome ' . $player['NickName'] . '$z$s$fff! You are not alone, you belong to ' . $res[0]['team_name'];
+                /* $this->aseco->client->query('ChatSendServerMessageToLogin', $msg, $player['Login']); */
+            } else {
+                $matchedTeam = null;
+                $nickname = $this->stripColors($player['NickName']);
+                if (count($this->warTeams)) {
+                    foreach ($this->warTeams as $team) {
+                        $ids = explode(",", $team['team_identifiers']);
+                        foreach ($ids as $id) {
+                            if (strpos($nickname, $id) !== false) {
+                                $matchedTeam = $team;
+                            }
+                        }
+                    }
+                }
+
+                if ($matchedTeam === null) {
+                    $msg = $this->chatPrefix . 'No team matches your nickname, ask an admin or team captain to manually add you or change nickname';
+                    $this->aseco->client->query('ChatSendServerMessageToLogin', $this->aseco->formatColors($msg), $player['Login']);
+                } else {
+                    $query = 'INSERT INTO war_team_players (player_id, team_id) VALUES (' . $player['Id'] . ',' . $matchedTeam['Id'] . ')';
+                    mysql_query($query);
+
+                    $msg = $this->chatPrefix . 'You were added to team: ' . $matchedTeam['team_name'];
+                    $this->aseco->client->query('ChatSendServerMessageToLogin', $this->aseco->formatColors($msg), $player['Login']);
+                }
+            }
+        }
+        $this->aseco->client->query('ChatSendServerMessageToLogin', $this->aseco->formatColors($this->chatPrefix . 'Players synced'), $author->login);
+    }
+
     public function setMode($params, $command)
     {
         $player = $command['author'];
@@ -1147,6 +1191,9 @@ function chat_war($aseco, $command)
             break;
         case 'mode':
             $warPlugin->setMode($params, $command);
+            break;
+        case 'syncplayers':
+            $warPlugin->syncPlayers($command);
             break;
         default:
             $aseco->client->query('ChatSendServerMessageToLogin', $aseco->formatColors('Command not found'), $player->login);

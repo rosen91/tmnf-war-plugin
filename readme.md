@@ -51,6 +51,10 @@ Makes a player captain of the team he/she is currently in.
 Forces a player into a team regardless of tags.  
 *Usable by MasterAdmin and Captain*
 
+```/war syncplayers```
+Reiterates all players and tries to add missing players to teams.  
+*Usable by MasterAdmin*
+
 ```/war maxpoints <number>```  
 Set number of players to get points. Default: 10.  
 *Usable by MasterAdmin*
