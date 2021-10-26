@@ -765,6 +765,17 @@ class WarPlugin
         $this->aseco->client->query('ChatSendServerMessage', $this->aseco->formatColors($msg));
     }
 
+    public function stripColors($name) 
+    {
+        return
+            str_replace("\0", '$$',
+                preg_replace(
+                    '/\\$(?:[0-9a-f]..|[g-z]|$)/iu', '',
+                    str_replace('$$', "\0", $name)
+                )
+            );
+    }
+
     public function addPlayerToTeam($player)
     {
         $query = 'SELECT war_teams.team_name as team_name, war_team_players.player_id as player_id from war_team_players join war_teams on war_team_players.team_id=war_teams.Id where war_team_players.player_id=' . $player->id;
@@ -774,7 +785,7 @@ class WarPlugin
             $this->aseco->client->query('ChatSendServerMessageToLogin', $msg, $player->login);
         } else {
             $matchedTeam = null;
-            $nickname = $player->nickname;
+            $nickname = $this->stripColors($player->nickname);
             if (count($this->warTeams)) {
                 foreach ($this->warTeams as $team) {
                     $ids = explode(",", $team['team_identifiers']);
