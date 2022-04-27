@@ -765,12 +765,15 @@ class WarPlugin
         $this->aseco->client->query('ChatSendServerMessage', $this->aseco->formatColors($msg));
     }
 
-    public function stripColors($name) 
+    public function stripColors($name)
     {
         return
-            str_replace("\0", '$$',
+            str_replace(
+                "\0",
+                '$$',
                 preg_replace(
-                    '/\\$(?:[0-9a-f]..|[g-z]|$)/iu', '',
+                    '/\\$(?:[0-9a-f]..|[g-z]|$)/iu',
+                    '',
                     str_replace('$$', "\0", $name)
                 )
             );
@@ -810,7 +813,7 @@ class WarPlugin
         }
     }
 
-    public function syncPlayers($command) 
+    public function syncPlayers($command)
     {
         $author = $command['author'];
         if (!$this->isMasterAdmin($author)) {
@@ -1039,7 +1042,7 @@ class WarPlugin
             foreach ($this->tracklist as $map) {
                 $pPoints += $this->getPlayerPointsPerMap($map['Id'], $player['Id']);
             }
-            $playerRecs[] = ['nickname' => $player['NickName'], 'login' => $player['Login'], 'points' => $pPoints];
+            $playerRecs[] = ['nickname' => re_handleSpecialChars($player['NickName']), 'login' => $player['Login'], 'points' => $pPoints];
         }
 
         usort($playerRecs, function ($item1, $item2) {
